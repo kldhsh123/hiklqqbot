@@ -26,13 +26,15 @@ class BasePlugin(ABC):
         self.logger = logging.getLogger(f"plugin.{command}")
     
     @abstractmethod
-    async def handle(self, params: str, user_id: str = None) -> str:
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
         """
         处理命令的核心方法，需要子类实现
         
         Args:
             params: 命令参数
             user_id: 用户ID，用于权限控制
+            group_openid: 群组ID
+            **kwargs: 其他额外参数
             
         Returns:
             处理结果

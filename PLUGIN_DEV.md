@@ -55,13 +55,15 @@ class EchoPlugin(BasePlugin):
         )
         self.logger = logging.getLogger("plugin.echo")
     
-    async def handle(self, params: str, user_id: str = None) -> str:
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
         """
         处理echo命令
         
         Args:
             params: 用户输入的文本
             user_id: 用户ID，用于权限控制
+            group_openid: 群组ID，标识消息来源的群
+            **kwargs: 其他额外参数，包括完整的事件数据
             
         Returns:
             str: 相同的文本
@@ -105,9 +107,11 @@ def __init__(self):
 
 - `params`: 命令后的参数文本
 - `user_id`: 发送命令的用户ID，用于权限控制
+- `group_openid`: 群组ID，标识消息来源的群（如果是群消息）
+- `**kwargs`: 其他额外参数，包括完整的事件数据
 
 ```python
-async def handle(self, params: str, user_id: str = None) -> str:
+async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
     # 处理命令逻辑
     return "命令处理结果"
 ```
@@ -115,7 +119,7 @@ async def handle(self, params: str, user_id: str = None) -> str:
 ## 注册插件
 
 创建插件后，您需要将其注册到插件管理器中.
-```
+
 ### 方法1：自动加载
 
 HiklQQBot 支持自动加载插件，只需确保您的插件文件放在 `plugins` 目录下，并且命名遵循插件命名规范。
@@ -141,7 +145,7 @@ class AdminOnlyPlugin(BasePlugin):
     def __init__(self):
         super().__init__("admin_cmd", "仅管理员可用的命令", is_builtin=True)
     
-    async def handle(self, params: str, user_id: str = None) -> str:
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
         # 检查用户是否是管理员
         if not auth_manager.is_admin(user_id):
             return "您没有权限执行此命令"
@@ -173,8 +177,8 @@ class CounterPlugin(BasePlugin):
         super().__init__("count", "计数器插件")
         self.counters = {}  # 用户计数器
     
-    async def handle(self, params: str) -> str:
-        user_id = params.split()[0] if params else "global"
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
+        user_id = user_id or "global"
         if user_id not in self.counters:
             self.counters[user_id] = 0
         self.counters[user_id] += 1
@@ -196,7 +200,7 @@ class WeatherPlugin(BasePlugin):
         super().__init__("天气", "查询指定城市的天气信息")
         self.api_key = "您的API密钥"
     
-    async def handle(self, params: str) -> str:
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
         if not params:
             return "请提供城市名称，例如: 天气 北京"
         
@@ -221,7 +225,7 @@ HiklQQBot 使用异步编程模型，确保您的插件充分利用异步特性�
 
 ```python
 # 推荐
-async def handle(self, params: str) -> str:
+async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             return await response.text()
@@ -237,7 +241,7 @@ def sync_request(url):
 确保您的插件能够优雅地处理错误，不要让异常导致整个机器人崩溃。
 
 ```python
-async def handle(self, params: str) -> str:
+async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
     try:
         # 可能出错的代码
         result = await self.do_something_risky(params)
@@ -256,7 +260,7 @@ def __init__(self):
     super().__init__("mycommand", "我的插件")
     self.logger = logging.getLogger("plugin.mycommand")
 
-async def handle(self, params: str) -> str:
+async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
     self.logger.info(f"收到命令，参数: {params}")
     # 处理逻辑
     self.logger.debug("处理详情: ...")
@@ -283,7 +287,7 @@ class DocumentedPlugin(BasePlugin):
             is_builtin=False
         )
     
-    async def handle(self, params: str, user_id: str = None) -> str:
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
         """
         处理doc命令
         
@@ -292,6 +296,8 @@ class DocumentedPlugin(BasePlugin):
                    参数1: 第一个参数的说明
                    参数2: 第二个参数的说明
             user_id: 用户ID，用于权限控制
+            group_openid: 群组ID，标识消息来源的群
+            **kwargs: 其他额外参数，包括完整的事件数据
         
         Returns:
             str: 处理结果
@@ -327,7 +333,7 @@ class DocumentedPlugin(BasePlugin):
 **A**: 每个插件实例只能处理一个命令。如果您需要处理多个相关命令，可以创建多个插件实例或使用子命令模式：
 
 ```python
-async def handle(self, params: str) -> str:
+async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
     parts = params.split(maxsplit=1)
     subcommand = parts[0] if parts else ""
     subparams = parts[1] if len(parts) > 1 else ""

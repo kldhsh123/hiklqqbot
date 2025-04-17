@@ -13,13 +13,15 @@ class HiklqqbotReloadPlugin(BasePlugin):
         super().__init__(command="/hiklqqbot_reload", description="重新加载所有插件", is_builtin=True)
         self.logger = logging.getLogger("plugin.reload")
     
-    async def handle(self, params: str, user_id: str = None) -> str:
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
         """
         处理reload命令，重新加载plugins目录下的所有插件
         
         Args:
             params: 参数，可以为空或特定的插件名称
             user_id: 用户ID，用于权限控制
+            group_openid: 群组ID（不使用）
+            **kwargs: 其他额外参数
             
         Returns:
             str: 重载结果信息

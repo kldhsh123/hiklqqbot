@@ -1,4 +1,5 @@
-from .base_plugin import BasePlugin
+from plugins.base_plugin import BasePlugin
+import logging
 from auth_manager import auth_manager
 
 class HiklqqbotMaintenancePlugin(BasePlugin):
@@ -12,14 +13,17 @@ class HiklqqbotMaintenancePlugin(BasePlugin):
             description="设置或查看维护模式状态 (仅管理员可用)", 
             is_builtin=True
         )
+        self.logger = logging.getLogger("plugin.hiklqqbot_maintenance")
     
-    async def handle(self, params: str, user_id: str = None) -> str:
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
         """
         设置或查询维护模式
         
         Args:
             params: 命令参数 (on/off)
             user_id: 用户ID
+            group_openid: 群组ID（不使用）
+            **kwargs: 其他额外参数
             
         Returns:
             处理结果

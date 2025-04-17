@@ -1,78 +1,90 @@
-from .base_plugin import BasePlugin
+from plugins.base_plugin import BasePlugin
+import logging
+import json
+import os
 from auth_manager import auth_manager
 
 class HiklqqbotAdminPlugin(BasePlugin):
     """
-    管理员管理插件，用于添加和删除管理员
+    管理员管理插件，用于添加/删除/查看管理员
     """
     
     def __init__(self):
         super().__init__(
             command="/hiklqqbot_admin", 
-            description="管理员管理 (仅管理员可用)", 
-            is_builtin=True
+            description="管理员管理：添加/删除/查看管理员", 
+            is_builtin=True,
+            hidden=False
         )
-    
-    async def handle(self, params: str, user_id: str = None) -> str:
-        """
-        管理员管理命令处理
+        self.logger = logging.getLogger("plugin.admin")
         
-        命令格式:
-        - /hiklqqbot_admin list: 列出所有管理员
-        - /hiklqqbot_admin add <user_id>: 添加管理员
-        - /hiklqqbot_admin remove <user_id>: 移除管理员
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
+        """
+        处理管理员相关命令
         
         Args:
             params: 命令参数
-            user_id: 用户ID
+            user_id: 用户ID，用于权限控制
+            group_openid: 群组ID（不使用）
+            **kwargs: 其他额外参数
             
         Returns:
-            处理结果
+            str: 处理结果
         """
-        # 检查是否是管理员
+        self.logger.info(f"收到管理员管理命令，参数: {params}, 用户: {user_id}")
+        
+        # 检查权限，仅允许当前管理员执行
         if not auth_manager.is_admin(user_id):
-            # 如果没有管理员，第一个使用此命令的人成为管理员
-            if not auth_manager.get_admins():
-                auth_manager.add_admin(user_id)
-                return f"您已成为系统的第一个管理员 (ID: {user_id})"
-            return "您没有权限执行此命令，请联系管理员"
+            return "您没有权限执行管理员命令"
         
-        # 参数检查
-        if not params:
-            return "参数不足，请指定操作: list, add, remove"
-        
+        # 解析参数
         parts = params.strip().split()
-        operation = parts[0].lower()
         
-        # 处理不同操作
-        if operation == "list":
+        # 无参数时，显示当前管理员列表
+        if not parts:
             admins = auth_manager.get_admins()
             if not admins:
                 return "当前没有管理员"
-            return "管理员列表:\n" + "\n".join(admins)
             
-        elif operation == "add":
+            return "当前管理员列表：\n" + "\n".join([f"- {admin}" for admin in admins])
+        
+        # 获取操作和用户ID
+        operation = parts[0].lower()
+        
+        # 添加管理员
+        if operation == "add":
             if len(parts) < 2:
-                return "请指定要添加的用户ID"
+                return "请指定要添加的管理员ID，例如: /hiklqqbot_admin add 12345"
             
             target_id = parts[1]
-            if auth_manager.add_admin(target_id):
-                return f"已添加管理员: {target_id}"
-            else:
-                return f"添加管理员失败，可能该用户已是管理员"
-                
-        elif operation == "remove":
+            if auth_manager.is_admin(target_id):
+                return f"用户 {target_id} 已经是管理员"
+            
+            auth_manager.add_admin(target_id)
+            return f"已将用户 {target_id} 添加为管理员"
+        
+        # 删除管理员
+        elif operation == "remove" or operation == "delete":
             if len(parts) < 2:
-                return "请指定要移除的用户ID"
+                return "请指定要删除的管理员ID，例如: /hiklqqbot_admin remove 12345"
             
             target_id = parts[1]
-            if target_id == user_id:
-                return "不能移除自己的管理员权限"
-                
-            if auth_manager.remove_admin(target_id):
-                return f"已移除管理员: {target_id}"
-            else:
-                return f"移除管理员失败，可能该用户不是管理员"
-                
+            if not auth_manager.is_admin(target_id):
+                return f"用户 {target_id} 不是管理员"
+            
+            auth_manager.remove_admin(target_id)
+            return f"已将用户 {target_id} 从管理员列表中移除"
+        
+        # 重新加载管理员列表
+        elif operation == "reload":
+            auth_manager.reload_admins()
+            return "管理员列表已重新加载"
+        
+        # 未知操作
         else:
-            return f"未知操作: {operation}，支持的操作: list, add, remove" 
+            return f"""无效的操作: {operation}
+可用操作:
+- add <用户ID>: 添加管理员
+- remove <用户ID>: 删除管理员
+- reload: 重新加载管理员列表
+- 无参数: 显示当前管理员列表""" 
