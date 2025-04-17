@@ -151,19 +151,19 @@ HiklQQBot 内置了以下插件：
 | 命令 | 格式 | 描述 |
 | --- | --- | --- |
 | 运势 | 运势 [主题] | 获取今日运势值(1-100)和相应描述，可选择特定主题 |
-| 1 | 1 | 返回固定回复"2" |
-| hiklqqbot_ping | hiklqqbot_ping | 测试机器人是否在线，返回pong和当前时间 |
+| 1 | /1 | 返回固定回复"2" |
+| hiklqqbot_ping | /hiklqqbot_ping | 测试机器人是否在线，返回pong和当前时间 |
 
 ### 系统命令
 
 | 命令 | 格式 | 描述 |
 | --- | --- | --- |
-| hiklqqbot_userid | hiklqqbot_userid | 获取您的用户ID，用于权限设置 |
-| hiklqqbot_admin | hiklqqbot_admin list | 列出所有管理员 |
-| hiklqqbot_admin | hiklqqbot_admin add <用户ID> | 添加管理员（仅现有管理员可用） |
-| hiklqqbot_admin | hiklqqbot_admin remove <用户ID> | 移除管理员（仅现有管理员可用） |
-| hiklqqbot_maintenance | hiklqqbot_maintenance | 查看维护模式状态（仅管理员可用） |
-| hiklqqbot_maintenance | hiklqqbot_maintenance on/off | 开启/关闭维护模式（仅管理员可用） |
+| hiklqqbot_userid | /hiklqqbot_userid | 获取您的用户ID，用于权限设置 |
+| hiklqqbot_admin | /hiklqqbot_admin list | 列出所有管理员 |
+| hiklqqbot_admin | /hiklqqbot_admin add <用户ID> | 添加管理员（仅现有管理员可用） |
+| hiklqqbot_admin | /hiklqqbot_admin remove <用户ID> | 移除管理员（仅现有管理员可用） |
+| hiklqqbot_maintenance | /hiklqqbot_maintenance | 查看维护模式状态（仅管理员可用） |
+| hiklqqbot_maintenance | /hiklqqbot_maintenance on/off | 开启/关闭维护模式（仅管理员可用） |
 
 ### 消息格式
 
