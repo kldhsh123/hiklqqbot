@@ -177,7 +177,10 @@ class EventHandler:
         
         # 处理命令
         try:
-            return await plugin_manager.handle_command(command, params, user_id)
+            # 提取群ID信息
+            group_openid = data.get("group_openid")
+            # 传递完整事件数据
+            return await plugin_manager.handle_command(command, params, user_id, group_openid=group_openid, event_data=data)
         except Exception as e:
             self.logger.error(f"处理命令时出错: {e}")
             return f"处理命令时出错: {e}"

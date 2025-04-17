@@ -261,7 +261,7 @@ class PluginManager:
         
         return help_text
     
-    async def handle_command(self, command: str, params: str = "", user_id: str = None) -> str:
+    async def handle_command(self, command: str, params: str = "", user_id: str = None, **kwargs) -> str:
         """
         处理命令
         
@@ -269,11 +269,12 @@ class PluginManager:
             command: 命令名称
             params: 命令参数
             user_id: 用户ID，用于权限控制
+            **kwargs: 额外参数，如group_openid等
             
         Returns:
             处理结果
         """
-        self.logger.info(f"处理命令: {command}, 参数: {params}, 用户ID: {user_id}")
+        self.logger.info(f"处理命令: {command}, 参数: {params}, 用户ID: {user_id}, 额外参数: {kwargs}")
         
         # 检查维护模式
         if auth_manager.is_maintenance_mode() and not auth_manager.is_admin(user_id):
@@ -286,7 +287,8 @@ class PluginManager:
             return help_text
         
         try:
-            return await plugin.handle(params, user_id)
+            # 将额外参数传递给插件的handle方法
+            return await plugin.handle(params, user_id, **kwargs)
         except Exception as e:
             error_msg = f"处理命令 {command} 时出错: {str(e)}"
             self.logger.error(error_msg)
