@@ -1,0 +1,12 @@
+requests==2.28.2
+aiohttp==3.8.3
+fastapi==0.88.0
+uvicorn==0.20.0
+python-dotenv==1.0.0
+pydantic==1.10.2
+PyNaCl==1.5.0
+websockets==10.4
+# 签名验证，二选一即可
+# ed25519==1.5
+# 添加内网穿透工具(可选)
+# pyngrok==6.0.0 
