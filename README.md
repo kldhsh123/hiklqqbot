@@ -176,19 +176,19 @@ HiklQQBot 内置了简单而有效的权限管理系统：
 
 ### 管理员权限
 
-- 首次使用 `hiklqqbot_admin` 命令的用户将自动成为第一个管理员
+- 首次使用 `/hiklqqbot_admin` 命令的用户将自动成为第一个管理员
 - 管理员可以添加和删除其他管理员
 - 管理员信息保存在 `admins.json` 文件中
 
 ### 维护模式
 
-- 管理员可以通过 `hiklqqbot_maintenance on` 命令开启维护模式
+- 管理员可以通过 `/hiklqqbot_maintenance on` 命令开启维护模式
 - 维护模式下，只有管理员可以使用机器人，其他用户的命令将被拒绝
 - 适用于机器人维护、更新或临时禁用的场景
 
 ### 获取用户ID
 
-- 用户可以通过 `hiklqqbot_userid` 命令获取自己的用户ID
+- 用户可以通过 `/hiklqqbot_userid` 命令获取自己的用户ID
 - 管理员可以使用此ID添加其他用户为管理员
 
 ## 插件开发
