@@ -135,10 +135,10 @@ HiklQQBot 内置了以下插件：
 
 ### 系统插件
 
-- `PingPlugin`: 检测机器人在线状态，发送 "hiklqqbot_ping" 会收到 "pong" 和时间戳
-- `UserIdPlugin`: 获取用户ID，用于管理员权限设置，命令为 "hiklqqbot_userid"
-- `AdminMgmtPlugin`: 管理员管理，添加/移除管理员，命令为 "hiklqqbot_admin"
-- `MaintenancePlugin`: 维护模式控制，仅管理员可用，命令为 "hiklqqbot_maintenance"
+- `PingPlugin`: 检测机器人在线状态，发送 "/hiklqqbot_ping" 会收到 "pong" 和时间戳
+- `UserIdPlugin`: 获取用户ID，用于管理员权限设置，命令为 "/hiklqqbot_userid"
+- `AdminMgmtPlugin`: 管理员管理，添加/移除管理员，命令为 "/hiklqqbot_admin"
+- `MaintenancePlugin`: 维护模式控制，仅管理员可用，命令为 "/hiklqqbot_maintenance"
 
 ### 自定义插件
 
@@ -153,7 +153,6 @@ HiklQQBot 内置了以下插件：
 | --- | --- | --- |
 | 运势 | /运势 [主题] | 获取今日运势值(1-100)和相应描述，可选择特定主题 |
 | 1 | /1 | 返回固定回复"2" |
-| hiklqqbot_ping | /hiklqqbot_ping | 测试机器人是否在线，返回pong和当前时间 |
 
 ### 系统命令
 
@@ -165,6 +164,7 @@ HiklQQBot 内置了以下插件：
 | hiklqqbot_admin | /hiklqqbot_admin remove <用户ID> | 移除管理员（仅现有管理员可用） |
 | hiklqqbot_maintenance | /hiklqqbot_maintenance | 查看维护模式状态（仅管理员可用） |
 | hiklqqbot_maintenance | /hiklqqbot_maintenance on/off | 开启/关闭维护模式（仅管理员可用） |
+| hiklqqbot_ping | /hiklqqbot_ping | 测试机器人是否在线，返回pong和当前时间 |
 
 ### 消息格式
 
@@ -201,26 +201,6 @@ HiklQQBot 使用插件化设计，便于扩展新功能：
 1. 在 `plugins` 目录创建新的 Python 文件
 2. 继承 `BasePlugin` 类并实现 `handle` 方法
 3. 插件会自动加载，无需额外注册
-
-插件示例:
-
-```python
-from plugins.base_plugin import BasePlugin
-
-class MyPlugin(BasePlugin):
-    def __init__(self):
-        super().__init__(
-            command="mycmd",
-            description="我的自定义命令",
-            is_builtin=False,  # 是否为内置插件
-            hidden=False  # 是否在命令列表中隐藏
-        )
-        
-    async def handle(self, params: str, user_id: str = None) -> str:
-        if not params:
-            return "请提供参数"
-        return f"收到参数: {params}，来自用户: {user_id}"
-```
 
 ## 常见问题
 
