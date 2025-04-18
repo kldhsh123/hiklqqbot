@@ -28,11 +28,11 @@ body:
 
   - type: textarea
     attributes:
-      label: SpectreCore 版本、使用的提供商、使用的消息平台适配器
+      label: python以及依赖和插件版本
       description: >
-        请提供您的 SpectreCore 版本、使用的提供商、使用的消息平台适配器。
+        请提供您的python以及依赖和插件版本
       placeholder: >
-        如: 1.1.4 DeepSeek aiocqhttp, 5.1.4 gewechat 
+        如: 请提供您的python以及依赖和插件版本
     validations:
       required: true
 
