@@ -282,9 +282,8 @@ class PluginManager:
         
         plugin = self.get_plugin(command)
         if not plugin:
-            # 命令不存在，返回帮助信息
-            help_text = "未找到命令: " + command + "\n\n" + self.get_help()
-            return help_text
+            # 命令不存在，返回提示信息
+            return f"未找到命令: {command}\n你可以通过 /help 获取可用命令列表"
         
         try:
             # 将额外参数传递给插件的handle方法

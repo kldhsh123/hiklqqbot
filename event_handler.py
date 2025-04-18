@@ -158,9 +158,9 @@ class EventHandler:
         # 提取@消息中的实际命令内容 (移除@机器人的部分)
         clean_content = re.sub(r'<@!\d+>', '', content).strip()
         
-        # 如果空消息，直接返回帮助信息
+        # 如果空消息，直接返回提示信息
         if not clean_content:
-            return plugin_manager.get_help()
+            return "有什么事嘛？你可以通过 /help 获取可用命令列表"
         
         # 检查维护模式
         if auth_manager.is_maintenance_mode() and not auth_manager.is_admin(user_id):
@@ -171,16 +171,25 @@ class EventHandler:
         command = parts[0]
         params = parts[1] if len(parts) > 1 else ""
         
+        # 检查命令是否为help
+        if command.lower() == "/help":
+            return plugin_manager.get_help()
+            
         # 检查命令格式，必须以/开头
         if not command.startswith('/'):
-            return f"命令必须以/开头，例如: /{command}"
+            return f"命令必须以/开头，例如: /{command}\n你可以通过 /help 获取可用命令列表"
         
         # 处理命令
         try:
             # 提取群ID信息
             group_openid = data.get("group_openid")
             # 传递完整事件数据
-            return await plugin_manager.handle_command(command, params, user_id, group_openid=group_openid, event_data=data)
+            plugin = plugin_manager.get_plugin(command)
+            if not plugin:
+                # 命令不存在，返回提示信息
+                return f"未找到命令: {command}\n你可以通过 /help 获取可用命令列表"
+            
+            return await plugin.handle(params, user_id, group_openid=group_openid, event_data=data)
         except Exception as e:
             self.logger.error(f"处理命令时出错: {e}")
             return f"处理命令时出错: {e}"
