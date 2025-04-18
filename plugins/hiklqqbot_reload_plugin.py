@@ -3,6 +3,7 @@ import importlib
 import sys
 from plugins.base_plugin import BasePlugin
 from plugins.plugin_manager import plugin_manager
+from auth_manager import auth_manager
 
 class HiklqqbotReloadPlugin(BasePlugin):
     """
@@ -10,7 +11,7 @@ class HiklqqbotReloadPlugin(BasePlugin):
     """
     
     def __init__(self):
-        super().__init__(command="/hiklqqbot_reload", description="重新加载所有插件", is_builtin=True)
+        super().__init__(command="/hiklqqbot_reload", description="重新加载所有插件 (仅管理员可用)", is_builtin=True)
         self.logger = logging.getLogger("plugin.reload")
     
     async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
@@ -27,6 +28,10 @@ class HiklqqbotReloadPlugin(BasePlugin):
             str: 重载结果信息
         """
         self.logger.info(f"执行插件热重载，参数: {params}")
+        
+        # 检查用户是否是管理员
+        if not auth_manager.is_admin(user_id):
+            return "您没有权限执行此命令，请联系管理员"
         
         try:
             # 清空当前插件列表前先保存命令列表
