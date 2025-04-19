@@ -25,7 +25,7 @@ QQGFBot 采用插件化设计，这里收集了可用的插件资源，便于快
 
 ## 内置插件
 
-这些插件默认包含在QQGFBot中，无需额外安装。
+这些插件默认包含在hiklqqbot中，无需额外安装。
 
 ### 用户ID查询
 - **作者**: [kldhsh123](https://github.com/kldhsh123)
