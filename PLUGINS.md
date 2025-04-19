@@ -1,6 +1,6 @@
-# QQGFBot 插件市场
+# HiklQQBot 插件市场
 
-QQGFBot 采用插件化设计，这里收集了可用的插件资源，便于快速扩展机器人功能。你可以直接使用这些插件，或者参考它们开发自己的功能。
+HiklQQBot 采用插件化设计，这里收集了可用的插件资源，便于快速扩展机器人功能。你可以直接使用这些插件，或者参考它们开发自己的功能。
 
 
 ## 如何提交插件
@@ -119,7 +119,7 @@ class MyCustomPlugin(BasePlugin):
 
 ## 插件开发资源
 
-以下资源可以帮助你开发优质的QQGFBot插件：
+以下资源可以帮助你开发优质的HiklQQBot插件：
 
 - [QQ机器人官方文档](https://bot.q.qq.com/wiki/) - QQ官方机器人平台文档
 - [Aiohttp文档](https://docs.aiohttp.org/) - 用于异步HTTP请求
