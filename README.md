@@ -177,19 +177,20 @@ HiklQQBot 使用插件化设计，便于扩展新功能。要开发自己的插�
 ```python
 from plugins.base_plugin import BasePlugin
 
-class MyPlugin(BasePlugin):
+class MyCustomPlugin(BasePlugin):
     def __init__(self):
         super().__init__(
-            command="/mycmd",
-            description="我的自定义命令",
-            is_builtin=False,  # 是否为内置插件
-            hidden=False  # 是否在命令列表中隐藏
+            command="/mycmd",  # 命令前缀
+            description="我的自定义命令",  # 描述
+            is_builtin=False,  # 是否内置
+            hidden=False  # 是否在帮助中隐藏
         )
         
-    async def handle(self, params: str, user_id: str = None) -> str:
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
+        # 实现您的命令逻辑
         if not params:
             return "请提供参数"
-        return f"收到参数: {params}，来自用户: {user_id}"
+        return f"收到参数: {params}"
 ```
 
 ## 常见问题
