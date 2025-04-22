@@ -1,4 +1,5 @@
 # HiklQQBot 插件开发文档
+> 我们期待您天马行空的想法，您可以前往 [HiklQQBot官网](https://hiklbot.kldhsh.top/) 通过向AI描述您的想法来生成插件
 
 本文档将指导您如何为 HiklQQBot 框架开发自定义插件。HiklQQBot 采用插件化设计，使您能够轻松扩展机器人的功能。
 
