@@ -11,7 +11,7 @@ class HiklqqbotUseridPlugin(BasePlugin):
     
     def __init__(self):
         super().__init__(
-            command="/hiklqqbot_userid", 
+            command="hiklqqbot_userid", 
             description="查询您的用户ID）", 
             is_builtin=True,
             hidden=False

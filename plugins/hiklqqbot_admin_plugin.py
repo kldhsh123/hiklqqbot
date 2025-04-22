@@ -11,7 +11,7 @@ class HiklqqbotAdminPlugin(BasePlugin):
     
     def __init__(self):
         super().__init__(
-            command="/hiklqqbot_admin", 
+            command="hiklqqbot_admin", 
             description="管理员管理：添加/删除/查看管理员", 
             is_builtin=True,
             hidden=False

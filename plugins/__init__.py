@@ -12,8 +12,6 @@ __version__ = "1.0.0"
 
 # 内置核心插件列表
 BUILTIN_PLUGINS = [
-    "hello_plugin",  # 问候插件
-    "simple_response_plugin",  # 简单响应插件
     "ping_plugin",  # ping测试插件
     "admin_plugin",  # 管理员权限插件
     "reload_plugin",  # 热重载插件

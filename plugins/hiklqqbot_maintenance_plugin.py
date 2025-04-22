@@ -9,7 +9,7 @@ class HiklqqbotMaintenancePlugin(BasePlugin):
     
     def __init__(self):
         super().__init__(
-            command="/hiklqqbot_maintenance", 
+            command="hiklqqbot_maintenance", 
             description="设置或查看维护模式状态 (仅管理员可用)", 
             is_builtin=True
         )

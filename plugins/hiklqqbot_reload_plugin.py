@@ -11,7 +11,7 @@ class HiklqqbotReloadPlugin(BasePlugin):
     """
     
     def __init__(self):
-        super().__init__(command="/hiklqqbot_reload", description="重新加载所有插件 (仅管理员可用)", is_builtin=True)
+        super().__init__(command="hiklqqbot_reload", description="重新加载所有插件 (仅管理员可用)", is_builtin=True)
         self.logger = logging.getLogger("plugin.reload")
     
     async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:

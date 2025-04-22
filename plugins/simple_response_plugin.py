@@ -7,7 +7,7 @@ class SimpleResponsePlugin(BasePlugin):
     """
     
     def __init__(self):
-        super().__init__(command="/1", description="输入/1返回2", is_builtin=False)
+        super().__init__(command="1", description="输入/1返回2", is_builtin=False)
         self.logger = logging.getLogger("plugin.simple_response")
     
     async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:

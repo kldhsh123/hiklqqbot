@@ -8,7 +8,7 @@ class FortunePlugin(BasePlugin):
     """
     
     def __init__(self):
-        super().__init__(command="/运势", description="查看今日运势，返回1-100的幸运指数", is_builtin=False)
+        super().__init__(command="运势", description="查看今日运势，返回1-100的幸运指数", is_builtin=False)
         self.logger = logging.getLogger("plugin.fortune")
         
         # 运势等级说明

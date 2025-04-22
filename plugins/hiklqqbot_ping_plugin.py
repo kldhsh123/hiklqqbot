@@ -9,7 +9,7 @@ class HiklqqbotPingPlugin(BasePlugin):
     """
     
     def __init__(self):
-        super().__init__(command="/hiklqqbot_ping", description="测试机器人是否在线 (仅管理员可用)", is_builtin=True)
+        super().__init__(command="hiklqqbot_ping", description="测试机器人是否在线 (仅管理员可用)", is_builtin=True)
         self.logger = logging.getLogger("plugin.ping")
     
     async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
