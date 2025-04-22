@@ -69,7 +69,7 @@ cp .env.example .env
 1. 打开 `.env` 文件，填写以下信息：
 
 ```
-# 机器人凭据 (从QQ机器人开放平台获取)
+#v1.0.3
 BOT_APPID=你的机器人AppID
 BOT_APPSECRET=你的机器人AppSecret
 BOT_TOKEN=你的机器人Token
@@ -83,6 +83,9 @@ WEBHOOK_PORT=8080
 WEBHOOK_PATH=/webhook/callback
 # 如果使用内网穿透，请填写公网URL，否则留空
 WEBHOOK_FULL_URL=https://example.com/webhook/callback
+
+# 命令规范化设置：设置为true时，所有命令必须以/开头；设置为false时，允许不带/前缀的命令
+ENFORCE_COMMAND_PREFIX=true
 ```
 
 2. 如果使用 Webhook 模式，需要确保安装了相关依赖：
