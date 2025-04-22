@@ -11,6 +11,9 @@ from auth_manager import auth_manager
 
 logger = logging.getLogger("plugin_manager")
 
+# 从环境变量中读取是否启用命令前缀规范
+ENFORCE_COMMAND_PREFIX = os.environ.get("ENFORCE_COMMAND_PREFIX", "true").lower() == "true"
+
 class PluginManager:
     """
     插件管理器，负责加载和管理所有插件
@@ -66,7 +69,7 @@ class PluginManager:
     def _clean_duplicate_commands(self):
         """
         清理重复的命令和不规范的命令格式
-        确保所有命令都以/开头，且不存在重复命令
+        根据配置决定是否确保所有命令都以/开头，并处理重复命令
         """
         self.logger.info("开始清理重复和非标准命令...")
         
@@ -75,8 +78,8 @@ class PluginManager:
         duplicate_count = 0
         
         for cmd, plugin in list(self.plugins.items()):
-            # 确保命令以/开头
-            if not cmd.startswith('/'):
+            # 根据配置决定是否确保命令以/开头
+            if ENFORCE_COMMAND_PREFIX and not cmd.startswith('/'):
                 new_cmd = f'/{cmd}'
                 self.logger.warning(f"命令 {cmd} 不符合规范，已更正为 {new_cmd}")
                 plugin.command = new_cmd  # 更新插件内部命令属性
@@ -94,7 +97,7 @@ class PluginManager:
                 if cmd in self.plugins:
                     del self.plugins[cmd]
             else:
-                # 命令已符合规范，直接添加
+                # 命令已符合规范或不强制规范，直接添加
                 cleaned_plugins[cmd] = plugin
         
         # 更新插件列表
@@ -111,9 +114,9 @@ class PluginManager:
         Args:
             plugin: 插件实例
         """
-        # 标准化命令名称（确保以/开头）
+        # 根据配置决定是否标准化命令名称（确保以/开头）
         command = plugin.command
-        if not command.startswith('/'):
+        if ENFORCE_COMMAND_PREFIX and not command.startswith('/'):
             command = f'/{command}'
             # 更新插件内部的命令属性
             plugin.command = command
@@ -122,8 +125,8 @@ class PluginManager:
         base_name = command.lstrip('/')
         plain_command = base_name  # 不带前缀的版本
         
-        # 如果存在不带前缀的版本，移除它
-        if plain_command in self.plugins:
+        # 如果存在不带前缀的版本且强制规范化开启，移除它
+        if ENFORCE_COMMAND_PREFIX and plain_command in self.plugins:
             self.logger.warning(f"发现不带前缀的插件命令 {plain_command}，将被替换为 {command}")
             del self.plugins[plain_command]
         
@@ -134,7 +137,6 @@ class PluginManager:
         # 注册标准化后的命令
         self.plugins[command] = plugin
         self.logger.info(f"注册插件: {plugin.__class__.__name__}, 命令: {command}, 类型: {'内置' if plugin.is_builtin else '自定义'}")
-        
         
     def register_plugins_from_directory(self, directory: str = "plugins") -> None:
         """
@@ -280,10 +282,21 @@ class PluginManager:
         if auth_manager.is_maintenance_mode() and not auth_manager.is_admin(user_id):
             return "机器人当前处于维护模式，仅管理员可用"
         
+        # 根据配置处理命令前缀
+        # 如果强制规范化打开，但命令不以/开头，自动添加/
+        if ENFORCE_COMMAND_PREFIX and not command.startswith('/'):
+            command = f'/{command}'
+        
         plugin = self.get_plugin(command)
         if not plugin:
+            # 如果找不到命令，且命令以/开头，尝试查找不带/的版本（兼容模式）
+            if command.startswith('/') and not ENFORCE_COMMAND_PREFIX:
+                plain_command = command[1:]
+                plugin = self.get_plugin(plain_command)
+            
             # 命令不存在，返回提示信息
-            return f"未找到命令: {command}\n你可以通过 /help 获取可用命令列表"
+            if not plugin:
+                return f"未找到命令: {command}\n你可以通过 /help 获取可用命令列表"
         
         try:
             # 将额外参数传递给插件的handle方法
