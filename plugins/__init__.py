@@ -15,6 +15,7 @@ BUILTIN_PLUGINS = [
     "ping_plugin",  # ping测试插件
     "admin_plugin",  # 管理员权限插件
     "reload_plugin",  # 热重载插件
+    "ai_chat_plugin",  # AI聊天插件
 ]
 
 # 其他插件列表

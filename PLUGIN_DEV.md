@@ -10,6 +10,7 @@
 - [插件生命周期](#插件生命周期)
 - [注册插件](#注册插件)
 - [命令规范化](#命令规范化)
+- [消息发送](#消息发送)
 - [进阶功能](#进阶功能)
 - [最佳实践](#最佳实践)
 - [常见问题解答](#常见问题解答)
@@ -169,6 +170,79 @@ def __init__(self):
 ```
 
 这样可以确保您的插件在不同的配置下都能正常工作。
+
+## 消息发送
+
+HiklQQBot 支持发送多种类型的消息，包括群聊消息、频道消息和私聊消息。
+
+### 发送私聊消息
+
+您可以使用 `MessageSender` 类在插件中发送私聊消息：
+
+```python
+from message import MessageSender
+
+class MyPlugin(BasePlugin):
+    async def handle(self, params: str, user_id: str = None, **kwargs) -> str:
+        # 发送普通文本私聊消息
+        MessageSender.send_private_message(
+            user_openid=user_id,  # 接收消息的用户openid
+            message_content="这是一条私聊消息"
+        )
+        
+        # 发送带按钮的私聊消息
+        keyboard = {
+            "buttons": [
+                {"id": "1", "text": "选项1"},
+                {"id": "2", "text": "选项2"}
+            ]
+        }
+        MessageSender.send_private_message(
+            user_openid=user_id,
+            message_content="请选择一个选项",
+            keyboard=keyboard
+        )
+        
+        return "消息已发送"
+```
+
+### 回复私聊消息
+
+您可以回复用户发送的私聊消息：
+
+```python
+from message import MessageSender
+
+class MyPlugin(BasePlugin):
+    async def handle(self, params: str, user_id: str = None, **kwargs) -> str:
+        # 获取原消息ID（通常从事件数据中获取）
+        original_msg_id = kwargs.get("message", {}).get("id")
+        
+        if original_msg_id:
+            # 回复用户的消息
+            MessageSender.reply_private_message(
+                user_openid=user_id,
+                message_id=original_msg_id,
+                message_content="这是对您消息的回复"
+            )
+            return "已回复"
+        else:
+            return "找不到原始消息ID"
+```
+
+### 消息限制说明
+
+根据QQ机器人平台规则，消息发送存在以下限制：
+
+- **私聊消息**：
+  - 主动消息每月每位用户最多4条
+  - 被动消息（回复类）有效期为60分钟，每条消息最多回复5次
+
+- **群聊消息**：
+  - 主动消息每月每个群最多4条
+  - 被动消息（回复类）有效期为5分钟，每条消息最多回复5次
+
+为了避免触发限制，建议优先使用被动消息（回复用户的消息），并合理管理消息频率。
 
 ## 进阶功能
 
