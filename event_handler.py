@@ -356,7 +356,7 @@ class EventHandler:
             plugin = plugin_manager.get_plugin(command)
             if not plugin:
                 # 命令不存在，返回提示信息
-                return f"未找到命令: {command}\n你可以通过 /help 获取可用命令列表"
+                return f"未找到命令\n你可以通过 /help 获取可用命令列表"
             
             return await plugin.handle(params, user_id, group_openid=group_openid, event_data=data)
         except Exception as e:
