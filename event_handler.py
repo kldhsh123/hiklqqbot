@@ -7,6 +7,7 @@ import asyncio
 from message import MessageSender
 from auth_manager import auth_manager
 import traceback
+from typing import Optional
 
 # 配置日志
 logger = logging.getLogger("event_handler")
@@ -286,35 +287,37 @@ class EventHandler:
         return True
     
     async def _process_command(self, content, data, user_id=None):
-        """处理命令，找到插件则创建后台任务执行"""
+        """处理命令，找到插件或特殊命令（如/help）则创建后台任务执行"""
         clean_content = re.sub(r'<@!\d+>', '', content).strip()
         event_type = data.get("type")
         is_at_message = event_type in ["AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"]
         is_direct_message = event_type in ["DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE"]
 
+        # 如果不是@消息、私聊消息，且内容不以/开头，则忽略 (避免处理普通群聊消息)
         if not is_at_message and not is_direct_message and not clean_content.startswith('/'):
-             return False
+             self.logger.debug(f"忽略非 / 开头的普通群/频道消息: {clean_content[:50]}...")
+             return False # 表明未处理
 
+        # 处理空内容的情况
         if not clean_content:
+            # 只在 @消息 或 私聊 时回复提示
             if is_at_message or is_direct_message:
                 response = "有什么事嘛？你可以通过 /help 获取可用命令列表"
                 message_id = data.get("id")
                 target_id, is_group = self._get_channel_id(data)
                 if target_id:
-                     async def send_simple_reply():
+                     async def send_empty_reply(): # 修改函数名避免冲突
                           try:
-                               if message_id:
-                                    if is_group: await asyncio.to_thread(MessageSender.reply_group_message, target_id, message_id, "text", response)
-                                    else: await asyncio.to_thread(MessageSender.reply_private_message, target_id, message_id, response)
-                               else:
-                                    if is_group: await asyncio.to_thread(MessageSender.send_group_message, target_id, "text", response)
-                                    else: await asyncio.to_thread(MessageSender.send_private_message, target_id, response)
+                               # 使用统一的回复逻辑
+                               await self._send_reply(target_id, message_id, is_group, event_type, response)
                           except Exception as e:
                                self.logger.error(f"发送空命令提示时出错: {e}")
-                     asyncio.create_task(send_simple_reply())
-                     return True
-            return False
+                               self.logger.error(traceback.format_exc())
+                     asyncio.create_task(send_empty_reply())
+                     return True # 表明已处理 (开始发送回复)
+            return False # 其他情况（如空内容的普通群消息）不处理
 
+        # 检查维护模式
         if auth_manager.is_maintenance_mode() and not auth_manager.is_admin(user_id):
             response = "机器人当前处于维护模式，仅管理员可用"
             message_id = data.get("id")
@@ -322,68 +325,124 @@ class EventHandler:
             if target_id:
                  async def send_maint_reply():
                       try:
-                           if message_id:
-                                if is_group: await asyncio.to_thread(MessageSender.reply_group_message, target_id, message_id, "text", response)
-                                else: await asyncio.to_thread(MessageSender.reply_private_message, target_id, message_id, response)
-                           else:
-                                if is_group: await asyncio.to_thread(MessageSender.send_group_message, target_id, "text", response)
-                                else: await asyncio.to_thread(MessageSender.send_private_message, target_id, response)
+                          await self._send_reply(target_id, message_id, is_group, event_type, response)
                       except Exception as e:
                            self.logger.error(f"发送维护模式提示时出错: {e}")
+                           self.logger.error(traceback.format_exc())
                  asyncio.create_task(send_maint_reply())
-                 return True
-            return False
+                 return True # 表明已处理
+            return False # 无法发送回复则认为未处理
 
+        # 分割命令和参数
         parts = clean_content.strip().split(' ', 1)
         command_raw = parts[0]
         params = parts[1] if len(parts) > 1 else ""
         
         command = command_raw
+        
+        # 检查命令前缀和私聊的特殊处理 (结合AI启用状态)
         if ENFORCE_COMMAND_PREFIX and not command.startswith('/') and not is_direct_message and not is_at_message:
-             self.logger.debug(f"忽略非 / 开头的普通群消息: {command}")
-             return False
+             self.logger.debug(f"忽略非 / 开头的普通群/频道消息 (强制前缀): {command}")
+             return False # 不处理普通消息
         elif is_direct_message and not command.startswith('/'):
+             # 私聊时，如果AI未启用，且未使用 / 前缀，则提示需要加 /
              if not ENABLE_AI_CHAT:
-                  response = f"命令必须以/开头，例如: /{command}\n你可以通过 /help 获取可用命令列表"
+                  response = f"命令必须以/开头\n你可以通过 /help 获取可用命令列表"
                   message_id = data.get("id")
-                  target_id, _ = self._get_channel_id(data)
+                  target_id, is_group = self._get_channel_id(data) # is_group 应为 False
                   if target_id:
                        async def send_prefix_reply():
                             try:
-                                 if message_id: await asyncio.to_thread(MessageSender.reply_private_message, target_id, message_id, response)
-                                 else: await asyncio.to_thread(MessageSender.send_private_message, target_id, response)
+                                await self._send_reply(target_id, message_id, is_group, event_type, response)
                             except Exception as e:
                                  self.logger.error(f"发送命令前缀提示时出错: {e}")
+                                 self.logger.error(traceback.format_exc())
                        asyncio.create_task(send_prefix_reply())
-                       return True
-                  return False
+                       return True # 已处理 (发送提示)
+                  return False # 无法发送提示
+             # 如果AI启用，私聊时非 / 开头的消息可能触发AI (如果AI插件逻辑支持)
+             # 这里不直接处理，交给后续的插件查找逻辑 (或者AI插件的特殊处理)
+             pass 
+        # 如果强制前缀，但命令没加/ (主要针对非私聊非@的情况，上面已处理)
+        # elif ENFORCE_COMMAND_PREFIX and not command.startswith('/'):
+        #     command = f'/{command}' # 强制加上 / - 这段逻辑似乎被上面的条件覆盖了，暂且注释
 
+        # --- 修改开始: 统一处理流程 ---
+        
+        # 尝试查找插件
         plugin = plugin_manager.get_plugin(command)
-        if not plugin and command.startswith('/'):
+        # 如果找不到带 / 的，并且不强制前缀，尝试找不带 / 的 (兼容旧插件或用户习惯)
+        if not plugin and command.startswith('/') and not ENFORCE_COMMAND_PREFIX:
              plugin = plugin_manager.get_plugin(command[1:])
-
+        
+        response_to_send = None # 用于存储需要直接发送的响应 (help 或 not found)
+        
         if plugin:
-            self.logger.info(f"为命令 '{command}' 创建后台处理任务")
+            # 找到插件，启动后台任务处理
+            self.logger.info(f"为命令 '{command}' 找到插件 '{plugin.__class__.__name__}'，创建后台处理任务")
             asyncio.create_task(self._run_plugin_and_reply(plugin, params, user_id, data))
-            return True
+            return True # 表示已开始处理
+        elif command.lower() == "/help":
+            # 特殊处理 /help 命令
+            self.logger.info("处理内置 /help 命令")
+            response_to_send = plugin_manager.get_help()
         else:
-            response = f"未找到命令 '{command}'\n你可以通过 /help 获取可用命令列表"
+            # 未找到插件，也不是 /help
+             self.logger.warning(f"未找到命令 '{command}'")
+             response_to_send = f"未找到命令\n你可以通过 /help 获取可用命令列表"
+
+        # 如果有直接响应需要发送 (help 或 not found)
+        if response_to_send:
             message_id = data.get("id")
             target_id, is_group = self._get_channel_id(data)
             if target_id:
-                 async def send_notfound_reply():
+                 # 使用后台任务发送响应
+                 async def send_direct_reply(response_text):
                       try:
-                           if message_id:
-                                if is_group: await asyncio.to_thread(MessageSender.reply_group_message, target_id, message_id, "text", response)
-                                else: await asyncio.to_thread(MessageSender.reply_private_message, target_id, message_id, response)
-                           else:
-                                if is_group: await asyncio.to_thread(MessageSender.send_group_message, target_id, "text", response)
-                                else: await asyncio.to_thread(MessageSender.send_private_message, target_id, response)
+                          await self._send_reply(target_id, message_id, is_group, event_type, response_text)
+                          self.logger.info(f"已发送直接回复到 {target_id} (Help/Not Found)")
                       except Exception as e:
-                           self.logger.error(f"发送未找到命令提示时出错: {e}")
-                 asyncio.create_task(send_notfound_reply())
-                 return True
-            return False
+                           self.logger.error(f"发送直接回复 (Help/Not Found) 时出错: {e}")
+                           self.logger.error(traceback.format_exc())
+                 asyncio.create_task(send_direct_reply(response_to_send))
+                 return True # 表示已开始处理 (发送回复)
+            else:
+                 # 无法确定回复目标
+                 self.logger.error(f"无法为命令 '{command}' 的直接响应确定回复目标")
+                 return False # 表示处理失败
+
+        # 如果既没找到插件，也不是/help，也没能发送'Not Found'回复，则返回False
+        return False
+        # --- 修改结束 ---
+
+    async def _send_reply(self, target_id: str, message_id: Optional[str], is_group: bool, event_type: Optional[str], response: str):
+        """统一的发送回复逻辑"""
+        if not response or not target_id:
+             self.logger.warning(f"无法发送回复: response='{response}', target_id='{target_id}'")
+             return
+
+        self.logger.info(f"准备发送回复: target_id={target_id}, message_id={message_id}, is_group={is_group}, event_type={event_type}, response='{response[:50]}...'")
+
+        try:
+            if message_id: # 优先尝试回复原始消息
+                if is_group:
+                     await asyncio.to_thread(MessageSender.reply_group_message, target_id, message_id, "text", response)
+                elif event_type == "DIRECT_MESSAGE_CREATE" or event_type == "C2C_MESSAGE_CREATE":
+                     await asyncio.to_thread(MessageSender.reply_private_message, target_id, message_id, response)
+                else: # 处理频道内@消息等其他非群组、非私聊类型
+                     await asyncio.to_thread(MessageSender.reply_message, target_id, message_id, "text", response, is_group=False)
+            else: # 如果没有原始消息ID，直接发送
+                self.logger.warning(f"发送回复时未找到原始消息ID，将直接发送。Target: {target_id}, Event Type: {event_type}")
+                if is_group:
+                     await asyncio.to_thread(MessageSender.send_group_message, target_id, "text", response)
+                elif event_type == "DIRECT_MESSAGE_CREATE" or event_type == "C2C_MESSAGE_CREATE":
+                     await asyncio.to_thread(MessageSender.send_private_message, target_id, response)
+                else: # 处理频道内@消息等其他非群组、非私聊类型
+                     await asyncio.to_thread(MessageSender.send_message, target_id, "text", response, is_group=False)
+            self.logger.info(f"已发送回复到 {target_id}")
+        except Exception as e:
+            self.logger.error(f"发送回复时出错: {e}")
+            self.logger.error(traceback.format_exc())
 
 # 创建事件处理器实例
 event_handler = EventHandler()
