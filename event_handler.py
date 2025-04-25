@@ -32,14 +32,28 @@ class EventHandler:
             "RESUMED": self.handle_resumed,
         }
         
-        # AI聊天插件实例（如果启用）
+        # AI聊天插件实例（仅当功能启用时）
         self.ai_chat_plugin = None
         if ENABLE_AI_CHAT and AI_CHAT_MENTION_TRIGGER:
             try:
-                # 延迟导入，避免循环引用
-                from plugins.hiklqqbot_ai_chat_plugin import AIChatPlugin
-                self.ai_chat_plugin = AIChatPlugin()
-                self.logger.info("已加载AI聊天插件，@机器人将触发AI对话")
+                # 先检查模块是否存在，避免导入不存在的模块
+                import importlib.util
+                spec = importlib.util.find_spec('plugins.hiklqqbot_ai_chat_plugin')
+                if spec is not None:
+                    # 模块存在，尝试导入
+                    from plugins import hiklqqbot_ai_chat_plugin
+                    
+                    # 检查是否定义了AIChatPlugin并在__all__中导出
+                    if hasattr(hiklqqbot_ai_chat_plugin, '__all__') and 'AIChatPlugin' in getattr(hiklqqbot_ai_chat_plugin, '__all__'):
+                        if hasattr(hiklqqbot_ai_chat_plugin, 'AIChatPlugin'):
+                            self.ai_chat_plugin = hiklqqbot_ai_chat_plugin.AIChatPlugin()
+                            self.logger.info("已加载AI聊天插件，@机器人将触发AI对话")
+                        else:
+                            self.logger.info("AI聊天插件模块存在但未定义AIChatPlugin类")
+                    else:
+                        self.logger.info("AI聊天插件未在__all__中导出，不加载")
+                else:
+                    self.logger.info("未找到AI聊天插件模块，功能未启用")
             except Exception as e:
                 self.logger.error(f"加载AI聊天插件失败: {e}")
     
@@ -82,20 +96,18 @@ class EventHandler:
         # 输出关键信息便于调试
         clean_content = re.sub(r'<@!\d+>', '', content).strip() 
         clean_content = re.sub(r'@[\w\u4e00-\u9fa5]+\s*', '', clean_content).strip()
-        self.logger.info(f"@消息处理前: 原始内容=[{content}], 清理后=[{clean_content}], AI插件状态={self.ai_chat_plugin is not None}")
         
-        # 明确打印各个条件的判断结果
-        is_ai_enabled = ENABLE_AI_CHAT
-        is_mention_enabled = AI_CHAT_MENTION_TRIGGER
-        is_enforce_prefix = ENFORCE_COMMAND_PREFIX
-        is_content_valid = bool(clean_content)
-        is_not_command = not clean_content.startswith('/')
-        is_plugin_loaded = self.ai_chat_plugin is not None
-        
-        self.logger.info(f"AI启用={is_ai_enabled}, @触发={is_mention_enabled}, 前缀强制={is_enforce_prefix}, 内容有效={is_content_valid}, 非命令={is_not_command}, 插件加载={is_plugin_loaded}")
-        
-        # 修改判断逻辑，总是尝试使用AI处理非命令@消息
+        # 仅当AI功能开启时才尝试使用AI处理
         if ENABLE_AI_CHAT and AI_CHAT_MENTION_TRIGGER:
+            self.logger.info(f"@消息处理前: 原始内容=[{content}], 清理后=[{clean_content}], AI插件状态={self.ai_chat_plugin is not None}")
+            
+            # 明确打印各个条件的判断结果
+            is_content_valid = bool(clean_content)
+            is_not_command = not clean_content.startswith('/')
+            is_plugin_loaded = self.ai_chat_plugin is not None
+            
+            self.logger.info(f"AI启用=True, @触发=True, 前缀强制={ENFORCE_COMMAND_PREFIX}, 内容有效={is_content_valid}, 非命令={is_not_command}, 插件加载={is_plugin_loaded}")
+            
             try:
                 # 只要不是以/开头的消息，都当作AI聊天处理
                 if clean_content and not clean_content.startswith('/'):
@@ -104,9 +116,24 @@ class EventHandler:
                     # 如果插件未加载，尝试重新加载
                     if not self.ai_chat_plugin:
                         try:
-                            from plugins.hiklqqbot_ai_chat_plugin import AIChatPlugin
-                            self.ai_chat_plugin = AIChatPlugin()
-                            self.logger.info("已重新加载AI聊天插件")
+                            # 先检查模块是否存在
+                            import importlib.util
+                            spec = importlib.util.find_spec('plugins.hiklqqbot_ai_chat_plugin')
+                            if spec is not None:
+                                # 模块存在，尝试导入
+                                from plugins import hiklqqbot_ai_chat_plugin
+                                
+                                # 检查是否定义了AIChatPlugin并在__all__中导出
+                                if hasattr(hiklqqbot_ai_chat_plugin, '__all__') and 'AIChatPlugin' in getattr(hiklqqbot_ai_chat_plugin, '__all__'):
+                                    if hasattr(hiklqqbot_ai_chat_plugin, 'AIChatPlugin'):
+                                        self.ai_chat_plugin = hiklqqbot_ai_chat_plugin.AIChatPlugin()
+                                        self.logger.info("已重新加载AI聊天插件")
+                                    else:
+                                        self.logger.warning("AI聊天插件模块存在但未定义AIChatPlugin类")
+                                else:
+                                    self.logger.info("AI聊天插件未在__all__中导出，不加载")
+                            else:
+                                self.logger.info("未找到AI聊天插件模块，功能未启用")
                         except Exception as e:
                             self.logger.error(f"加载AI聊天插件失败: {e}")
                     
@@ -176,23 +203,21 @@ class EventHandler:
         group_openid = data.get("group_openid")
         message_id = data.get("id")
         
-        # 输出关键信息便于调试
+        # 清理消息内容
         clean_content = re.sub(r'<@!\d+>', '', content).strip()
         clean_content = re.sub(r'@[\w\u4e00-\u9fa5]+\s*', '', clean_content).strip()
-        self.logger.info(f"群@消息处理前: 原始内容=[{content}], 清理后=[{clean_content}], AI插件状态={self.ai_chat_plugin is not None}")
         
-        # 明确打印各个条件的判断结果
-        is_ai_enabled = ENABLE_AI_CHAT
-        is_mention_enabled = AI_CHAT_MENTION_TRIGGER
-        is_enforce_prefix = ENFORCE_COMMAND_PREFIX
-        is_content_valid = bool(clean_content)
-        is_not_command = not clean_content.startswith('/')
-        is_plugin_loaded = self.ai_chat_plugin is not None
-        
-        self.logger.info(f"AI启用={is_ai_enabled}, @触发={is_mention_enabled}, 前缀强制={is_enforce_prefix}, 内容有效={is_content_valid}, 非命令={is_not_command}, 插件加载={is_plugin_loaded}")
-        
-        # 修改判断逻辑，总是尝试使用AI处理非命令@消息
+        # 仅当AI功能开启时才尝试使用AI处理
         if ENABLE_AI_CHAT and AI_CHAT_MENTION_TRIGGER:
+            self.logger.info(f"群@消息处理前: 原始内容=[{content}], 清理后=[{clean_content}], AI插件状态={self.ai_chat_plugin is not None}")
+            
+            # 明确打印各个条件的判断结果
+            is_content_valid = bool(clean_content)
+            is_not_command = not clean_content.startswith('/')
+            is_plugin_loaded = self.ai_chat_plugin is not None
+            
+            self.logger.info(f"AI启用=True, @触发=True, 前缀强制={ENFORCE_COMMAND_PREFIX}, 内容有效={is_content_valid}, 非命令={is_not_command}, 插件加载={is_plugin_loaded}")
+            
             try:
                 # 只要不是以/开头的消息，都当作AI聊天处理
                 if clean_content and not clean_content.startswith('/'):
@@ -201,9 +226,24 @@ class EventHandler:
                     # 如果插件未加载，尝试重新加载
                     if not self.ai_chat_plugin:
                         try:
-                            from plugins.hiklqqbot_ai_chat_plugin import AIChatPlugin
-                            self.ai_chat_plugin = AIChatPlugin()
-                            self.logger.info("已重新加载AI聊天插件")
+                            # 先检查模块是否存在
+                            import importlib.util
+                            spec = importlib.util.find_spec('plugins.hiklqqbot_ai_chat_plugin')
+                            if spec is not None:
+                                # 模块存在，尝试导入
+                                from plugins import hiklqqbot_ai_chat_plugin
+                                
+                                # 检查是否定义了AIChatPlugin并在__all__中导出
+                                if hasattr(hiklqqbot_ai_chat_plugin, '__all__') and 'AIChatPlugin' in getattr(hiklqqbot_ai_chat_plugin, '__all__'):
+                                    if hasattr(hiklqqbot_ai_chat_plugin, 'AIChatPlugin'):
+                                        self.ai_chat_plugin = hiklqqbot_ai_chat_plugin.AIChatPlugin()
+                                        self.logger.info("已重新加载AI聊天插件")
+                                    else:
+                                        self.logger.warning("AI聊天插件模块存在但未定义AIChatPlugin类")
+                                else:
+                                    self.logger.info("AI聊天插件未在__all__中导出，不加载")
+                            else:
+                                self.logger.info("未找到AI聊天插件模块，功能未启用")
                         except Exception as e:
                             self.logger.error(f"加载AI聊天插件失败: {e}")
                     
@@ -297,7 +337,7 @@ class EventHandler:
             
         # 检查命令格式，必须以/开头
         if ENFORCE_COMMAND_PREFIX and not command.startswith('/'):
-            # 如果AI聊天启用和@触发启用，提示可以直接聊天
+            # 仅在AI聊天启用时提示可以直接聊天
             if ENABLE_AI_CHAT and AI_CHAT_MENTION_TRIGGER:
                 return f"您似乎想使用命令，命令必须以/开头，例如: /{command}\n或者您可以直接和我聊天，我会用AI回答您"
             else:

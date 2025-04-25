@@ -45,7 +45,13 @@ class PluginManager:
                     module_path = f"{plugin_package_name}.{module_name}"
                     module = importlib.import_module(module_path)
                     
+                    # 检查模块是否导出了任何内容（特别是对于AI模块，可能会根据配置不导出任何内容）
+                    if hasattr(module, '__all__') and len(getattr(module, '__all__')) == 0:
+                        self.logger.info(f"模块 {module_name} 未导出任何内容，跳过加载")
+                        continue
+                    
                     # 查找模块中的插件类
+                    found_plugin = False
                     for _, obj in inspect.getmembers(module, inspect.isclass):
                         if (issubclass(obj, BasePlugin) and 
                             obj is not BasePlugin and 
@@ -54,7 +60,11 @@ class PluginManager:
                             # 实例化插件并注册
                             plugin = obj()
                             self.register_plugin(plugin)
+                            found_plugin = True
                             
+                    if not found_plugin:
+                        self.logger.info(f"模块 {module_name} 中未找到插件类")
+                        
                 except Exception as e:
                     self.logger.error(f"加载插件模块 {module_name} 失败: {str(e)}")
             
