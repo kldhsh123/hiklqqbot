@@ -21,7 +21,12 @@ HiklQQBot 采用插件化设计，这里收集了可用的插件资源，便于�
 
 以下是社区贡献的插件，通过安装这些插件可以扩展机器人功能。
 
-暂无插件，欢迎提交！
+### 幸福工厂工具箱
+- **作者**: Sakura
+- **仓库**: [GitHub链接](https://github.com/NY1200NY)
+- **描述**: Satisfactory游戏服务器工具包
+- **命令**: /Factory status/save/shutdown/sessions/options/setup
+- **安装**: 详见[安装教程](https://factory.sturry.asia)
 
 
 ## 内置插件
