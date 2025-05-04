@@ -66,27 +66,7 @@ cp .env.example .env
 
 ## 配置
 
-1. 打开 `.env` 文件，填写以下信息：
-
-```
-#v1.0.3
-BOT_APPID=你的机器人AppID
-BOT_APPSECRET=你的机器人AppSecret
-BOT_TOKEN=你的机器人Token
-
-# 通信模式: "webhook" 或 "websocket"
-COMM_MODE=websocket
-
-# Webhook相关设置（仅在COMM_MODE=webhook时使用）
-WEBHOOK_HOST=0.0.0.0
-WEBHOOK_PORT=8080
-WEBHOOK_PATH=/webhook/callback
-# 如果使用内网穿透，请填写公网URL，否则留空
-WEBHOOK_FULL_URL=https://example.com/webhook/callback
-
-# 命令规范化设置：设置为true时，所有命令必须以/开头；设置为false时，允许不带/前缀的命令
-ENFORCE_COMMAND_PREFIX=true
-```
+1. 打开 `.env` 文件，填写所需信息
 
 2. 如果使用 Webhook 模式，需要确保安装了相关依赖：
 
