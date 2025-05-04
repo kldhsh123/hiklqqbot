@@ -12,9 +12,21 @@ from plugins.hiklqqbot_maintenance_plugin import HiklqqbotMaintenancePlugin
 from plugins.hiklqqbot_userid_plugin import HiklqqbotUseridPlugin
 from plugins.hiklqqbot_reload_plugin import HiklqqbotReloadPlugin
 
+# 确保彩色日志格式化器模块可用
+try:
+    import color_formatter
+    # 预加载colorama以确保控制台颜色正常工作
+    import colorama
+    colorama.init(autoreset=True)
+    logging.info("彩色日志格式化器已加载")
+except ImportError as e:
+    print(f"无法加载彩色日志格式化器: {e}")
+    print("将使用普通日志格式化器")
+
 # 使用配置文件初始化日志
 if os.path.exists('logging.ini'):
     logging.config.fileConfig('logging.ini')
+    logging.info("已从logging.ini加载日志配置")
 else:
     # 如果配置文件不存在，使用默认配置
     logging.basicConfig(
@@ -22,6 +34,7 @@ else:
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+    logging.warning("logging.ini文件不存在，使用默认日志配置")
 
 logger = logging.getLogger("main")
 
