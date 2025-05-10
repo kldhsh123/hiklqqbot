@@ -60,15 +60,35 @@ def check_env():
 async def start_websocket_client():
     """启动WebSocket客户端"""
     logger.info("使用WebSocket模式启动QQ机器人...")
-    try:
-        # 连接到WebSocket
-        logger.info("正在连接到QQ机器人WebSocket网关...")
-        await ws_client.connect()
-    except Exception as e:
-        logger.error(f"WebSocket启动失败: {e}")
-    finally:
-        # 确保关闭所有资源
-        await ws_client.close()
+    max_restart_attempts = 5
+    restart_attempts = 0
+    restart_delay = 10  # 初始重启延迟（秒）
+    
+    while restart_attempts < max_restart_attempts:
+        try:
+            # 连接到WebSocket
+            logger.info("正在连接到QQ机器人WebSocket网关...")
+            await ws_client.connect()
+            
+            # 如果连接成功并运行完毕（正常结束），退出循环
+            break
+            
+        except Exception as e:
+            restart_attempts += 1
+            logger.error(f"WebSocket运行失败 (尝试 {restart_attempts}/{max_restart_attempts}): {e}")
+            
+            if restart_attempts < max_restart_attempts:
+                # 指数退避策略
+                restart_delay = min(restart_delay * 2, 300)  # 最大等待5分钟
+                logger.info(f"将在 {restart_delay} 秒后重新启动WebSocket客户端...")
+                await asyncio.sleep(restart_delay)
+            else:
+                logger.critical("WebSocket客户端达到最大重启次数，退出程序")
+        finally:
+            # 确保关闭所有资源
+            await ws_client.close()
+    
+    logger.info("WebSocket客户端已停止")
 
 async def start_webhook_server():
     """启动Webhook服务器"""

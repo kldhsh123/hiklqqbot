@@ -325,22 +325,29 @@ if ENABLE_AI_CHAT:
             self.logger.debug(f"请求体: {json.dumps(payload, ensure_ascii=False)}")
             
             try:
+                # 使用更短的超时时间，防止WebSocket连接超时
+                timeout = aiohttp.ClientTimeout(total=20, connect=5, sock_connect=5, sock_read=15)
+                
                 # 创建会话时禁用自动解压
-                async with aiohttp.ClientSession(auto_decompress=False) as session:
+                conn = aiohttp.TCPConnector(force_close=True)  # 强制关闭连接，避免连接池问题
+                async with aiohttp.ClientSession(auto_decompress=False, timeout=timeout, connector=conn) as session:
                     # 设置禁用压缩的请求
                     async with session.post(
                         AI_CHAT_API_URL, 
                         headers=headers, 
                         json=payload,
-                        timeout=30,
                         compress=False  # 禁用请求压缩
                     ) as response:
                         self.logger.info(f"API响应状态码: {response.status}")
                         self.logger.info(f"API响应头: {response.headers}")
                         
-                        # 读取原始响应文本
-                        response_text = await response.text(errors='replace')
-                        self.logger.info(f"API原始响应前500字符: {response_text[:500]}...")
+                        # 读取原始响应文本，设置超时
+                        try:
+                            response_text = await asyncio.wait_for(response.text(errors='replace'), timeout=10)
+                            self.logger.info(f"API原始响应前500字符: {response_text[:500]}...")
+                        except asyncio.TimeoutError:
+                            self.logger.error("读取响应内容超时")
+                            return "读取API响应超时，请稍后再试"
                         
                         if response.status != 200:
                             error_msg = f"API请求失败，状态码: {response.status}"
@@ -391,7 +398,10 @@ if ENABLE_AI_CHAT:
                 self.logger.error(f"调用API时发生异常: {str(e)}")
                 self.logger.exception(e)
                 return f"调用API时发生错误: {str(e)[:100]}..."
-        
+            finally:
+                # 确保资源释放
+                self.logger.info("API调用完成，清理资源")
+
         async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
             """
             处理AI聊天命令
@@ -890,14 +900,19 @@ if ENABLE_AI_CHAT:
             """使用不同的请求配置重试API调用，解决gzip压缩问题"""
             self.logger.info("尝试使用不同的请求配置调用API")
 
-            # 第一种方法：使用标准设置
-            self.logger.info("方法1: 使用标准设置")
-            result = await self._call_ai_api(messages)
-            if not result.startswith("调用API失败") and not result.startswith("API请求失败") and not result.startswith("API响应解析错误"):
-                return result
+            # 第一种方法：使用标准设置但有更严格的超时控制
+            self.logger.info("方法1: 使用标准设置和严格超时控制")
+            try:
+                result = await asyncio.wait_for(self._call_ai_api(messages), timeout=25)
+                if not result.startswith("调用API失败") and not result.startswith("API请求失败") and not result.startswith("API响应解析错误"):
+                    return result
+            except asyncio.TimeoutError:
+                self.logger.error("方法1超时")
+            except Exception as e:
+                self.logger.error(f"方法1异常: {str(e)}")
 
             # 第二种方法：使用requests库尝试请求
-            self.logger.info("方法2: 使用同步请求")
+            self.logger.info("方法2: 使用同步请求但在单独线程中执行")
             try:
                 import requests
                 headers = {
@@ -917,34 +932,41 @@ if ENABLE_AI_CHAT:
                 self.logger.info("发送同步请求")
                 # 创建一个新的线程执行同步请求，避免阻塞事件循环
                 loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
+                # 使用更短的超时时间
+                response_future = loop.run_in_executor(
                     None,
                     lambda: requests.post(
                         AI_CHAT_API_URL,
                         headers=headers,
                         json=payload,
-                        timeout=30
+                        timeout=20
                     )
                 )
-
-                self.logger.info(f"同步请求响应状态码: {response.status_code}")
-                if response.status_code == 200:
-                    try:
-                        response_data = response.json()
-                        if "choices" in response_data and response_data["choices"]:
-                            if "message" in response_data["choices"][0]:
-                                content = response_data["choices"][0]["message"].get("content", "")
-                                self.logger.info(f"从OpenAI格式响应提取内容: {content[:100]}...")
+                
+                # 添加整体超时
+                try:
+                    response = await asyncio.wait_for(response_future, timeout=25)
+                    
+                    self.logger.info(f"同步请求响应状态码: {response.status_code}")
+                    if response.status_code == 200:
+                        try:
+                            response_data = response.json()
+                            if "choices" in response_data and response_data["choices"]:
+                                if "message" in response_data["choices"][0]:
+                                    content = response_data["choices"][0]["message"].get("content", "")
+                                    self.logger.info(f"从OpenAI格式响应提取内容: {content[:100]}...")
+                                    return content
+                            if "response" in response_data:
+                                content = response_data.get("response", "")
+                                self.logger.info(f"从通用格式响应提取内容: {content[:100]}...")
                                 return content
-                        if "response" in response_data:
-                            content = response_data.get("response", "")
-                            self.logger.info(f"从通用格式响应提取内容: {content[:100]}...")
-                            return content
-                        return str(response_data)
-                    except Exception as e:
-                        self.logger.error(f"解析同步请求响应时出错: {str(e)}")
-                else:
-                    self.logger.error(f"同步请求失败，状态码: {response.status_code}, 响应: {response.text[:200]}")
+                            return str(response_data)
+                        except Exception as e:
+                            self.logger.error(f"解析同步请求响应时出错: {str(e)}")
+                    else:
+                        self.logger.error(f"同步请求失败，状态码: {response.status_code}, 响应: {response.text[:200]}")
+                except asyncio.TimeoutError:
+                    self.logger.error("方法2整体超时")
             except Exception as e:
                 self.logger.error(f"执行同步请求时出错: {str(e)}")
                 self.logger.exception(e)
@@ -955,7 +977,7 @@ if ENABLE_AI_CHAT:
                 import subprocess
                 
                 # 准备curl命令
-                cmd = ["curl", "-s", "-X", "POST", AI_CHAT_API_URL]
+                cmd = ["curl", "-s", "-m", "15", "-X", "POST", AI_CHAT_API_URL]  # 添加15秒超时
                 cmd.extend(["-H", "Content-Type: application/json"])
                 cmd.extend(["-H", "Accept-Encoding: identity"])
                 if AI_CHAT_API_KEY:
@@ -972,7 +994,7 @@ if ENABLE_AI_CHAT:
                 # 添加请求体
                 cmd.extend(["-d", json.dumps(payload)])
                 
-                # 执行curl命令
+                # 执行curl命令，添加整体超时
                 self.logger.info(f"执行curl命令: {' '.join(cmd[:5])}...")
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -980,37 +1002,46 @@ if ENABLE_AI_CHAT:
                     stderr=asyncio.subprocess.PIPE
                 )
                 
-                stdout, stderr = await process.communicate()
-                
-                if process.returncode == 0 and stdout:
-                    try:
-                        response_text = stdout.decode('utf-8')
-                        self.logger.info(f"curl命令响应: {response_text[:200]}...")
-                        
-                        response_data = json.loads(response_text)
-                        if "choices" in response_data and response_data["choices"]:
-                            if "message" in response_data["choices"][0]:
-                                content = response_data["choices"][0]["message"].get("content", "")
+                try:
+                    # 添加整体超时控制
+                    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=20)
+                    
+                    if process.returncode == 0 and stdout:
+                        try:
+                            response_text = stdout.decode('utf-8')
+                            self.logger.info(f"curl命令响应: {response_text[:200]}...")
+                            
+                            response_data = json.loads(response_text)
+                            if "choices" in response_data and response_data["choices"]:
+                                if "message" in response_data["choices"][0]:
+                                    content = response_data["choices"][0]["message"].get("content", "")
+                                    self.logger.info(f"从curl响应提取内容: {content[:100]}...")
+                                    return content
+                            if "response" in response_data:
+                                content = response_data.get("response", "")
                                 self.logger.info(f"从curl响应提取内容: {content[:100]}...")
                                 return content
-                        if "response" in response_data:
-                            content = response_data.get("response", "")
-                            self.logger.info(f"从curl响应提取内容: {content[:100]}...")
-                            return content
-                        return str(response_data)
-                    except Exception as e:
-                        self.logger.error(f"解析curl响应时出错: {str(e)}")
+                            return str(response_data)
+                        except Exception as e:
+                            self.logger.error(f"解析curl响应时出错: {str(e)}")
+                            stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
+                            self.logger.error(f"curl错误输出: {stderr_text}")
+                    else:
                         stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
-                        self.logger.error(f"curl错误输出: {stderr_text}")
-                else:
-                    stderr_text = stderr.decode('utf-8', errors='replace') if stderr else ""
-                    self.logger.error(f"curl命令执行失败，退出码: {process.returncode}, 错误: {stderr_text}")
+                        self.logger.error(f"curl命令执行失败，退出码: {process.returncode}, 错误: {stderr_text}")
+                except asyncio.TimeoutError:
+                    self.logger.error("curl命令执行超时")
+                    # 尝试终止进程
+                    try:
+                        process.terminate()
+                    except:
+                        pass
             except Exception as e:
                 self.logger.error(f"执行curl命令时出错: {str(e)}")
                 self.logger.exception(e)
             
             # 所有方法都失败，返回默认消息
-            return "抱歉，多次尝试请求AI服务都失败了，请联系管理员检查API配置。"
+            return "抱歉，多次尝试请求AI服务都失败了，请联系管理员检查API配置或网络连接。"
 
         def update_visibility(self):
             """根据配置更新插件的可见性"""
