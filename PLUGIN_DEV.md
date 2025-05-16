@@ -347,12 +347,10 @@ class CustomPlugin(BasePlugin):
 ```python
 {
     "group_id1": {
-        "name": "群组名称",
         "join_time": 1234567890,  # 时间戳
         "last_active": 1234567890,
         "members": ["user_id1", "user_id2", ...],
         "added_by": "user_id",
-        "can_send_proactive_msg": true
     },
     "group_id2": { ... }
 }
@@ -364,12 +362,9 @@ class CustomPlugin(BasePlugin):
 {
     "user_id1": {
         "name": "用户名称",
-        "avatar": "头像URL",
         "first_seen": 1234567890,  # 时间戳
         "last_active": 1234567890,
         "groups": ["group_id1", "group_id2", ...],
-        "is_friend": true,
-        "can_send_proactive_msg": true
     },
     "user_id2": { ... }
 }

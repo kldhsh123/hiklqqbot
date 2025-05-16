@@ -31,8 +31,8 @@ class StatsManager:
         self.stats_file = os.path.join(data_dir, "usage_stats.json")
         
         # 数据结构
-        self.groups = {}  # {group_id: {"name": name, "join_time": time, "members": [user_ids], ...}}
-        self.users = {}   # {user_id: {"name": name, "avatar": url, "first_seen": time, ...}}
+        self.groups = {}  # {group_id: {"join_time": time, "members": [user_ids], ...}}
+        self.users = {}   # {user_id: {"first_seen": time, ...}}
         self.usage_stats = {
             "commands": {},  # {command_name: count}
             "groups": {},    # {group_id: message_count}
@@ -142,7 +142,6 @@ class StatsManager:
         
         if group_openid not in self.groups:
             self.groups[group_openid] = {
-                "name": name or "群组",
                 "join_time": current_time,
                 "members": [],
                 "last_active": current_time,
@@ -151,8 +150,6 @@ class StatsManager:
             self.logger.info(f"添加新群组: {group_openid}")
         else:
             self.groups[group_openid]["last_active"] = current_time
-            if name:
-                self.groups[group_openid]["name"] = name
         
         self._save_data()
         return self.groups[group_openid]
@@ -222,8 +219,6 @@ class StatsManager:
         
         if user_openid not in self.users:
             self.users[user_openid] = {
-                "name": name or "用户",
-                "avatar": avatar,
                 "first_seen": current_time,
                 "last_active": current_time,
                 "groups": []
@@ -231,8 +226,6 @@ class StatsManager:
             self.logger.info(f"添加新用户: {user_openid}")
         else:
             self.users[user_openid]["last_active"] = current_time
-            if name:
-                self.users[user_openid]["name"] = name
             if avatar:
                 self.users[user_openid]["avatar"] = avatar
             # 确保用户有groups字段
