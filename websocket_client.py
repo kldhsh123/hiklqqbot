@@ -198,24 +198,31 @@ class WebSocketClient:
     
     async def handle_dispatch(self, data):
         """处理分发事件"""
-        event_type = data.get("t")
-        event_data = data.get("d", {})
-        
-        logger.info(f"收到事件: {event_type}")
-        
-        if event_type == "READY":
-            self.session_id = event_data.get("session_id")
-            logger.info(f"收到READY事件，会话ID: {self.session_id}")
-        elif event_type == "RESUMED":
-            logger.info("连接已恢复")
-        else:
-            # 处理其他事件
-            try:
-                # 使用事件处理器处理事件
-                result = await event_handler.handle_event(event_type, event_data)
-                logger.info(f"事件 {event_type} 处理结果: {result}")
-            except Exception as e:
-                logger.error(f"处理事件 {event_type} 异常: {e}")
+        try:
+            event_type = data.get("t", None)
+            event_data = data.get("d", {})
+            
+            if event_type:
+                logger.info(f"收到事件: {event_type}")
+                
+                # 处理会话ID (用于断线重连)
+                if event_type == "READY":
+                    self.session_id = event_data.get("session_id")
+                    logger.info(f"已准备就绪，会话ID: {self.session_id}")
+                
+                # 使用事件处理器处理所有类型的事件
+                try:
+                    # 支持QQ官方的所有事件类型：
+                    # 群组事件: GROUP_ADD_ROBOT, GROUP_DEL_ROBOT, GROUP_MSG_REJECT, GROUP_MSG_RECEIVE
+                    # 用户事件: FRIEND_ADD, FRIEND_DEL, C2C_MSG_REJECT, C2C_MSG_RECEIVE
+                    # 消息事件: AT_MESSAGE_CREATE, GROUP_AT_MESSAGE_CREATE, DIRECT_MESSAGE_CREATE
+                    await event_handler.handle_event(event_type, event_data)
+                except Exception as e:
+                    logger.error(f"事件处理失败 ({event_type}): {e}")
+            else:
+                logger.warning(f"收到没有事件类型的消息: {data}")
+        except Exception as e:
+            logger.error(f"分发事件异常: {e}")
     
     async def reconnect(self):
         """重新连接WebSocket"""
