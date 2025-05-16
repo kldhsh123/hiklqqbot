@@ -7,7 +7,8 @@ import asyncio
 from message import MessageSender
 from auth_manager import auth_manager
 import traceback
-from typing import Optional
+from typing import Optional, Dict, Any
+from stats_manager import stats_manager
 
 # 配置日志
 logger = logging.getLogger("event_handler")
@@ -18,20 +19,34 @@ AI_CHAT_MENTION_TRIGGER = os.environ.get("AI_CHAT_MENTION_TRIGGER", "true").lowe
 ENFORCE_COMMAND_PREFIX = os.environ.get("ENFORCE_COMMAND_PREFIX", "true").lower() == "true"
 
 class EventHandler:
-    """事件处理器"""
+    """
+    事件处理器：处理QQ机器人的各类事件
+    支持消息事件、机器人加入/退出群聊、用户添加/删除机器人等事件
+    """
     
     def __init__(self):
         self.logger = logger
         # 注册事件处理方法的映射
         self.event_handlers = {
+            # 消息事件 - 原有功能
             "AT_MESSAGE_CREATE": self.handle_at_message,
             "DIRECT_MESSAGE_CREATE": self.handle_direct_message,
             "C2C_MESSAGE_CREATE": self.handle_c2c_message,
             "GROUP_AT_MESSAGE_CREATE": self.handle_group_at_message,
-            "GROUP_MSG_REJECT": self.handle_group_msg_reject,
-            "GROUP_MSG_RECEIVE": self.handle_group_msg_receive,
             "READY": self.handle_ready,
             "RESUMED": self.handle_resumed,
+            
+            # 群组事件 - 新添加功能
+            "GROUP_ADD_ROBOT": self.handle_group_add_robot,
+            "GROUP_DEL_ROBOT": self.handle_group_del_robot,
+            "GROUP_MSG_REJECT": self.handle_group_msg_reject,
+            "GROUP_MSG_RECEIVE": self.handle_group_msg_receive,
+            
+            # 用户事件 - 新添加功能
+            "FRIEND_ADD": self.handle_friend_add,
+            "FRIEND_DEL": self.handle_friend_del,
+            "C2C_MSG_REJECT": self.handle_c2c_msg_reject,
+            "C2C_MSG_RECEIVE": self.handle_c2c_msg_receive
         }
         
         # AI聊天插件实例（仅当功能启用时）
@@ -235,6 +250,10 @@ class EventHandler:
         content = data.get("content", "")
         user_id = self._get_user_id(data)
 
+        # 记录用户统计数据
+        if user_id:
+            stats_manager.add_user(user_id)
+
         await self._process_command(content, data, user_id)
         return True
 
@@ -249,6 +268,15 @@ class EventHandler:
         self.logger.info(f"收到群聊@消息: {data}")
         content = data.get("content", "")
         user_id = self._get_user_id(data)
+        group_openid = data.get("group_openid")
+        
+        # 记录用户和群组统计数据
+        if user_id:
+            stats_manager.add_user(user_id)
+        if group_openid:
+            stats_manager.add_group(group_openid)
+            if user_id:
+                stats_manager.add_user_to_group(group_openid, user_id)
         
         clean_content = re.sub(r'<@!\d+>', '', content).strip()
         clean_content = re.sub(r'@[\w\u4e00-\u9fa5]+\s*', '', clean_content).strip()
@@ -266,16 +294,6 @@ class EventHandler:
         await self._process_command(content, data, user_id)
         return True
 
-    async def handle_group_msg_reject(self, data):
-        """处理群聊拒绝机器人主动消息事件"""
-        self.logger.info(f"群聊拒绝机器人主动消息: {data}")
-        return True
-    
-    async def handle_group_msg_receive(self, data):
-        """处理群聊接受机器人主动消息事件"""
-        self.logger.info(f"群聊接受机器人主动消息: {data}")
-        return True
-    
     async def handle_ready(self, data):
         """处理准备就绪事件"""
         self.logger.info(f"机器人就绪: {data}")
@@ -285,7 +303,7 @@ class EventHandler:
         """处理恢复连接事件"""
         self.logger.info("连接已恢复")
         return True
-    
+
     async def _process_command(self, content, data, user_id=None):
         """处理命令，找到插件或特殊命令（如/help）则创建后台任务执行"""
         clean_content = re.sub(r'<@!\d+>', '', content).strip()
@@ -377,6 +395,11 @@ class EventHandler:
         
         response_to_send = None # 用于存储需要直接发送的响应 (help 或 not found)
         
+        # 记录命令使用统计
+        if plugin:
+            group_openid = data.get("group_openid")
+            stats_manager.log_command(plugin.command, user_id, group_openid)
+            
         if plugin:
             # 找到插件，启动后台任务处理
             self.logger.info(f"为命令 '{command}' 找到插件 '{plugin.__class__.__name__}'，创建后台处理任务")
@@ -386,6 +409,8 @@ class EventHandler:
             # 特殊处理 /help 命令
             self.logger.info("处理内置 /help 命令")
             response_to_send = plugin_manager.get_help()
+            # 记录help命令使用
+            stats_manager.log_command("help", user_id, data.get("group_openid"))
         else:
             # 未找到插件，也不是 /help
              self.logger.warning(f"未找到命令 '{command}'")
@@ -444,5 +469,124 @@ class EventHandler:
             self.logger.error(f"发送回复时出错: {e}")
             self.logger.error(traceback.format_exc())
 
-# 创建事件处理器实例
+    # 新添加的群组和用户事件处理方法
+    async def handle_group_add_robot(self, event_data: Dict[str, Any]) -> bool:
+        """处理机器人加入群聊事件"""
+        self.logger.info(f"机器人被添加到群聊: {event_data}")
+        
+        group_openid = event_data.get("group_openid")
+        op_member_openid = event_data.get("op_member_openid")
+        timestamp = event_data.get("timestamp")
+        
+        if not group_openid:
+            self.logger.error("缺少群组ID")
+            return False
+        
+        return stats_manager.handle_group_add_robot(group_openid, op_member_openid, timestamp)
+    
+    async def handle_group_del_robot(self, event_data: Dict[str, Any]) -> bool:
+        """处理机器人退出群聊事件"""
+        self.logger.info(f"机器人被移出群聊: {event_data}")
+        
+        group_openid = event_data.get("group_openid")
+        op_member_openid = event_data.get("op_member_openid")
+        timestamp = event_data.get("timestamp")
+        
+        if not group_openid:
+            self.logger.error("缺少群组ID")
+            return False
+        
+        return stats_manager.handle_group_del_robot(group_openid, op_member_openid, timestamp)
+    
+    async def handle_group_msg_reject(self, event_data: Dict[str, Any]) -> bool:
+        """处理群聊拒绝机器人主动消息事件"""
+        self.logger.info(f"群聊拒绝机器人主动消息: {event_data}")
+        
+        group_openid = event_data.get("group_openid")
+        if not group_openid:
+            self.logger.error("缺少群组ID")
+            return False
+        
+        group = stats_manager.get_group(group_openid)
+        if group:
+            group["can_send_proactive_msg"] = False
+            stats_manager._save_data()
+            return True
+        return False
+    
+    async def handle_group_msg_receive(self, event_data: Dict[str, Any]) -> bool:
+        """处理群聊接受机器人主动消息事件"""
+        self.logger.info(f"群聊接受机器人主动消息: {event_data}")
+        
+        group_openid = event_data.get("group_openid")
+        if not group_openid:
+            self.logger.error("缺少群组ID")
+            return False
+        
+        group = stats_manager.get_group(group_openid)
+        if group:
+            group["can_send_proactive_msg"] = True
+            stats_manager._save_data()
+            return True
+        return False
+    
+    async def handle_friend_add(self, event_data: Dict[str, Any]) -> bool:
+        """处理用户添加机器人事件"""
+        self.logger.info(f"用户添加机器人: {event_data}")
+        
+        user_openid = event_data.get("openid")
+        timestamp = event_data.get("timestamp")
+        
+        if not user_openid:
+            self.logger.error("缺少用户ID")
+            return False
+        
+        return stats_manager.handle_friend_add(user_openid, timestamp)
+    
+    async def handle_friend_del(self, event_data: Dict[str, Any]) -> bool:
+        """处理用户删除机器人事件"""
+        self.logger.info(f"用户删除机器人: {event_data}")
+        
+        user_openid = event_data.get("openid")
+        timestamp = event_data.get("timestamp")
+        
+        if not user_openid:
+            self.logger.error("缺少用户ID")
+            return False
+        
+        return stats_manager.handle_friend_del(user_openid, timestamp)
+    
+    async def handle_c2c_msg_reject(self, event_data: Dict[str, Any]) -> bool:
+        """处理拒绝机器人主动消息事件"""
+        self.logger.info(f"用户拒绝机器人主动消息: {event_data}")
+        
+        user_openid = event_data.get("openid")
+        if not user_openid:
+            self.logger.error("缺少用户ID")
+            return False
+        
+        user = stats_manager.get_user(user_openid)
+        if user:
+            user["can_send_proactive_msg"] = False
+            stats_manager._save_data()
+            return True
+        return False
+    
+    async def handle_c2c_msg_receive(self, event_data: Dict[str, Any]) -> bool:
+        """处理接受机器人主动消息事件"""
+        self.logger.info(f"用户接受机器人主动消息: {event_data}")
+        
+        user_openid = event_data.get("openid")
+        if not user_openid:
+            self.logger.error("缺少用户ID")
+            return False
+        
+        user = stats_manager.get_user(user_openid)
+        if user:
+            user["can_send_proactive_msg"] = True
+            stats_manager._save_data()
+            return True
+        return False
+
+# 创建全局实例
 event_handler = EventHandler()

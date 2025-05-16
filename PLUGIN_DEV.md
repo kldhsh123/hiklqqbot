@@ -11,6 +11,7 @@
 - [注册插件](#注册插件)
 - [命令规范化](#命令规范化)
 - [消息发送](#消息发送)
+- [数据统计系统](#数据统计系统)
 - [进阶功能](#进阶功能)
 - [最佳实践](#最佳实践)
 - [常见问题解答](#常见问题解答)
@@ -244,6 +245,210 @@ class MyPlugin(BasePlugin):
 
 为了避免触发限制，建议优先使用被动消息（回复用户的消息），并合理管理消息频率。
 
+## 数据统计系统
+
+HiklQQBot 框架内置了数据统计系统，用于记录和管理机器人的统计数据，包括群组、用户和消息等信息。插件开发者可以使用这些数据来增强功能。
+
+### 统计系统的功能
+
+统计系统主要包括以下功能：
+
+1. 记录机器人加入/退出的群组信息
+2. 记录用户信息，包括用户头像
+3. 记录消息和命令使用统计
+4. 支持查询群组成员、用户信息等
+
+### 在插件中使用统计系统
+
+要在插件中使用统计系统，首先需要导入 `stats_manager`：
+
+```python
+from stats_manager import stats_manager
+```
+
+#### 获取用户信息
+
+```python
+class MyPlugin(BasePlugin):
+    async def handle(self, params: str, user_id: str = None, **kwargs) -> str:
+        # 获取用户信息
+        user_info = stats_manager.get_user(user_id)
+        if user_info:
+            user_name = user_info.get("name", "未知用户")
+            user_avatar = user_info.get("avatar")
+            return f"你好，{user_name}！"
+        else:
+            return "未找到用户信息"
+```
+
+#### 获取用户头像
+
+```python
+class ProfilePlugin(BasePlugin):
+    async def handle(self, params: str, user_id: str = None, **kwargs) -> str:
+        # 获取用户信息
+        user_info = stats_manager.get_user(user_id)
+        if user_info and user_info.get("avatar"):
+            return f"你的头像链接是: {user_info['avatar']}"
+        else:
+            return "未找到你的头像信息"
+```
+
+#### 获取群组信息和群组成员
+
+```python
+class GroupInfoPlugin(BasePlugin):
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
+        if not group_openid:
+            return "此命令只能在群聊中使用"
+        
+        # 获取群组信息
+        group_info = stats_manager.get_group(group_openid)
+        if not group_info:
+            return "未找到群组信息"
+        
+        # 获取群组成员ID列表
+        member_ids = stats_manager.get_group_members(group_openid)
+        
+        result = f"群组名称: {group_info.get('name', '未知')}\n"
+        result += f"成员数量: {len(member_ids)}\n\n"
+        
+        # 获取前5名成员信息
+        result += "成员列表 (前5名):\n"
+        for i, member_id in enumerate(member_ids[:5], 1):
+            member_info = stats_manager.get_user(member_id)
+            member_name = member_info.get("name", "未知") if member_info else "未知"
+            result += f"{i}. {member_name} ({member_id})\n"
+        
+        if len(member_ids) > 5:
+            result += f"...以及其他 {len(member_ids)-5} 名成员"
+        
+        return result
+```
+
+#### 记录命令使用情况
+
+```python
+class CustomPlugin(BasePlugin):
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
+        # 记录命令使用
+        stats_manager.log_command(self.command, user_id, group_openid)
+        
+        # 处理命令...
+        return "命令已处理"
+```
+
+### 统计数据结构
+
+统计系统维护以下主要数据结构：
+
+#### 群组数据
+
+```python
+{
+    "group_id1": {
+        "name": "群组名称",
+        "join_time": 1234567890,  # 时间戳
+        "last_active": 1234567890,
+        "members": ["user_id1", "user_id2", ...],
+        "added_by": "user_id",
+        "can_send_proactive_msg": true
+    },
+    "group_id2": { ... }
+}
+```
+
+#### 用户数据
+
+```python
+{
+    "user_id1": {
+        "name": "用户名称",
+        "avatar": "头像URL",
+        "first_seen": 1234567890,  # 时间戳
+        "last_active": 1234567890,
+        "groups": ["group_id1", "group_id2", ...],
+        "is_friend": true,
+        "can_send_proactive_msg": true
+    },
+    "user_id2": { ... }
+}
+```
+
+#### 使用统计数据
+
+```python
+{
+    "commands": {
+        "command1": 10,  # 使用次数
+        "command2": 5
+    },
+    "groups": {
+        "group_id1": 15,  # 消息数
+        "group_id2": 8
+    },
+    "users": {
+        "user_id1": 20,  # 消息数
+        "user_id2": 12
+    },
+    "total_messages": 100
+}
+```
+
+### 统计系统API参考
+
+#### 群组相关方法
+
+- `stats_manager.add_group(group_openid, name=None, op_member_openid=None)`: 添加或更新群组信息
+- `stats_manager.remove_group(group_openid)`: 移除群组
+- `stats_manager.get_group(group_openid)`: 获取群组信息
+- `stats_manager.get_all_groups()`: 获取所有群组信息
+- `stats_manager.add_user_to_group(group_openid, user_openid)`: 将用户添加到群组
+- `stats_manager.remove_user_from_group(group_openid, user_openid)`: 从群组移除用户
+- `stats_manager.get_group_members(group_openid)`: 获取群组所有成员ID
+
+#### 用户相关方法
+
+- `stats_manager.add_user(user_openid, name=None, avatar=None)`: 添加或更新用户信息
+- `stats_manager.get_user(user_openid)`: 获取用户信息
+- `stats_manager.get_all_users()`: 获取所有用户信息
+- `stats_manager.update_user_avatar(user_openid, avatar_url)`: 更新用户头像
+
+#### 统计相关方法
+
+- `stats_manager.log_command(command, user_openid=None, group_openid=None)`: 记录命令使用
+- `stats_manager.get_command_stats()`: 获取命令使用统计
+- `stats_manager.get_most_active_groups(limit=10)`: 获取最活跃的群组
+- `stats_manager.get_most_active_users(limit=10)`: 获取最活跃的用户
+
+### 使用内置统计插件
+
+框架提供了内置的统计管理插件，命令为 `hiklqqbot_stats`，仅供管理员使用，可以查看群组、用户和命令使用的统计数据。
+
+可用的子命令包括：
+
+- `hiklqqbot_stats groups [limit=10]`: 显示所有群组列表
+- `hiklqqbot_stats users [limit=10]`: 显示所有用户列表
+- `hiklqqbot_stats usage`: 显示命令使用统计
+- `hiklqqbot_stats group <群ID>`: 显示指定群组的详细信息
+- `hiklqqbot_stats user <用户ID>`: 显示指定用户的详细信息
+- `hiklqqbot_stats help`: 显示帮助信息
+
+### QQ平台事件支持
+
+统计系统会自动处理以下QQ平台事件：
+
+- `GROUP_ADD_ROBOT`: 机器人加入群聊
+- `GROUP_DEL_ROBOT`: 机器人退出群聊
+- `GROUP_MSG_REJECT`: 群聊拒绝机器人主动消息
+- `GROUP_MSG_RECEIVE`: 群聊接受机器人主动消息
+- `FRIEND_ADD`: 用户添加机器人
+- `FRIEND_DEL`: 用户删除机器人
+- `C2C_MSG_REJECT`: 拒绝机器人主动消息
+- `C2C_MSG_RECEIVE`: 接受机器人主动消息
+
+这些事件会自动更新统计数据，您不需要手动处理。
+
 ## 进阶功能
 
 ### 使用权限系统
@@ -439,7 +644,7 @@ class DocumentedPlugin(BasePlugin):
 
 ### Q: 如何在插件之间共享数据？
 
-**A**: 您可以使用全局变量、单例模式或外部存储（如数据库）来共享数据。
+**A**: 您可以使用全局变量、单例模式或外部存储（如数据库）来共享数据。此外，您还可以使用统计系统（`stats_manager`）来存储和共享一些常用数据。
 
 ### Q: 我的插件可以处理多个命令吗？
 
@@ -457,6 +662,32 @@ async def handle(self, params: str, user_id: str = None, group_openid: str = Non
         return self.handle_remove(subparams)
     else:
         return "未知的子命令，可用: add, remove"
+```
+
+### Q: 如何获取群组中的所有用户？
+
+**A**: 您可以使用统计系统提供的 `get_group_members` 方法：
+
+```python
+async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
+    if not group_openid:
+        return "此命令只能在群聊中使用"
+    
+    member_ids = stats_manager.get_group_members(group_openid)
+    return f"群组成员数: {len(member_ids)}"
+```
+
+### Q: 如何获取用户头像？
+
+**A**: 用户头像信息会被统计系统自动记录，您可以通过 `get_user` 方法获取：
+
+```python
+async def handle(self, params: str, user_id: str = None, **kwargs) -> str:
+    user_info = stats_manager.get_user(user_id)
+    if user_info and user_info.get("avatar"):
+        return f"你的头像: {user_info['avatar']}"
+    else:
+        return "未找到头像信息"
 ```
 
 ### Q: 如何编写支持交互式对话的插件？
