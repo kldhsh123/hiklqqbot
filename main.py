@@ -7,10 +7,12 @@ from websocket_client import ws_client
 from webhook_server import webhook_server
 from plugins.plugin_manager import plugin_manager
 from auth_manager import auth_manager
+from stats_manager import stats_manager
 from plugins.hiklqqbot_admin_plugin import HiklqqbotAdminPlugin
 from plugins.hiklqqbot_maintenance_plugin import HiklqqbotMaintenancePlugin
 from plugins.hiklqqbot_userid_plugin import HiklqqbotUseridPlugin
 from plugins.hiklqqbot_reload_plugin import HiklqqbotReloadPlugin
+from plugins.hiklqqbot_stats_plugin import HiklqqbotStatsPlugin
 
 # 确保彩色日志格式化器模块可用
 try:
@@ -115,6 +117,7 @@ def register_builtin_plugins():
     plugin_manager.register_plugin(HiklqqbotMaintenancePlugin())
     plugin_manager.register_plugin(HiklqqbotUseridPlugin())
     plugin_manager.register_plugin(HiklqqbotReloadPlugin())
+    plugin_manager.register_plugin(HiklqqbotStatsPlugin())
 
 async def main_async():
     """异步主程序"""
@@ -123,6 +126,10 @@ async def main_async():
     # 检查环境变量
     if not check_env():
         return
+    
+    # 初始化统计管理器
+    logger.info("初始化统计管理器...")
+    await stats_manager.start_auto_save(interval=300)  # 5分钟自动保存一次
     
     # 加载所有插件
     logger.info("正在加载插件...")

@@ -11,6 +11,7 @@
 - [注册插件](#注册插件)
 - [命令规范化](#命令规范化)
 - [消息发送](#消息发送)
+- [统计系统](#统计系统)
 - [进阶功能](#进阶功能)
 - [最佳实践](#最佳实践)
 - [常见问题解答](#常见问题解答)
@@ -243,6 +244,172 @@ class MyPlugin(BasePlugin):
   - 被动消息（回复类）有效期为5分钟，每条消息最多回复5次
 
 为了避免触发限制，建议优先使用被动消息（回复用户的消息），并合理管理消息频率。
+
+## 统计系统
+
+HiklQQBot 提供了强大的统计系统，记录并管理机器人的使用情况。插件可以使用这个系统获取群组、用户和事件信息。
+
+### 使用统计管理器
+
+在插件中导入并使用统计管理器：
+
+```python
+from stats_manager import stats_manager
+
+class MyPlugin(BasePlugin):
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
+        # 获取统计摘要
+        summary = stats_manager.get_stats_summary()
+        total_groups = summary["total_groups"]
+        total_users = summary["total_users"]
+        
+        # 获取特定群组的信息
+        group_info = stats_manager.get_group(group_openid)
+        
+        # 获取特定用户的信息
+        user_info = stats_manager.get_user(user_id)
+        
+        return f"机器人当前共有 {total_groups} 个群组和 {total_users} 个用户"
+```
+
+### 获取群组用户
+
+获取指定群组的所有用户ID：
+
+```python
+from stats_manager import stats_manager
+
+class GroupUserPlugin(BasePlugin):
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
+        if not params:
+            # 如果没有提供群组ID，使用当前群组
+            if not group_openid:
+                return "请提供群组ID或在群内使用此命令"
+            group_id = group_openid
+        else:
+            group_id = params.strip()
+        
+        # 获取群组中的所有用户
+        users = stats_manager.get_group_users(group_id)
+        
+        if not users:
+            return f"群组 {group_id} 中没有记录的用户"
+        
+        return f"群组 {group_id} 中共有 {len(users)} 个用户:\n" + "\n".join(users[:20]) + (f"\n... 等共 {len(users)} 个用户" if len(users) > 20 else "")
+```
+
+### 获取用户头像
+
+机器人收到的事件数据中通常包含用户的头像信息。您可以从事件数据中获取并使用这些信息：
+
+```python
+class UserAvatarPlugin(BasePlugin):
+    async def handle(self, params: str, user_id: str = None, **kwargs) -> str:
+        # 获取原始事件数据
+        event_data = kwargs.get("event_data", {})
+        
+        # 尝试从不同的字段中获取头像URL
+        avatar_url = None
+        
+        # 从author字段获取头像
+        author = event_data.get("author", {})
+        if author:
+            avatar_url = author.get("avatar")
+        
+        # 从user字段获取头像
+        if not avatar_url and "user" in event_data:
+            avatar_url = event_data.get("user", {}).get("avatar")
+        
+        # 从member字段获取头像（群成员）
+        if not avatar_url and "member" in event_data:
+            avatar_url = event_data.get("member", {}).get("avatar")
+        
+        if avatar_url:
+            return f"您的头像URL为: {avatar_url}"
+        else:
+            return "无法获取头像信息"
+```
+
+### 可用的统计数据方法
+
+统计管理器提供以下常用方法：
+
+#### 群组相关
+- `get_group(group_id)`: 获取指定群组的信息
+- `get_all_groups()`: 获取所有群组的信息
+- `get_active_groups()`: 获取所有活跃的群组
+- `get_group_users(group_id)`: 获取群组中的所有用户ID
+
+#### 用户相关
+- `get_user(user_id)`: 获取指定用户的信息
+- `get_all_users()`: 获取所有用户的信息
+- `get_user_groups(user_id)`: 获取用户所在的所有群组ID
+
+#### 事件相关
+- `get_events(event_type=None, limit=100)`: 获取指定类型的事件记录
+- `get_event_count(event_type=None)`: 获取事件计数
+- `get_stats_summary()`: 获取统计摘要
+
+#### 数据记录
+- `add_group(group_id, group_name=None, ...)`: 添加/更新群组信息
+- `add_user(user_id, user_name=None, ...)`: 添加/更新用户信息
+- `add_user_to_group(group_id, user_id)`: 将用户添加到群组
+- `add_event(event_type, event_data)`: 记录事件
+
+### 示例：分析群组活跃度
+
+```python
+from plugins.base_plugin import BasePlugin
+from stats_manager import stats_manager
+import time
+from datetime import datetime, timedelta
+
+class GroupActivityPlugin(BasePlugin):
+    def __init__(self):
+        super().__init__(
+            command="activity",
+            description="分析群组活跃度",
+            admin_only=True  # 仅管理员可用
+        )
+    
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
+        if not params and not group_openid:
+            return "请提供群组ID或在群内使用此命令"
+        
+        target_group = params.strip() if params else group_openid
+        
+        # 获取群组信息
+        group_info = stats_manager.get_group(target_group)
+        if not group_info:
+            return f"未找到群组 {target_group} 的信息"
+        
+        # 获取群组中的用户
+        users = stats_manager.get_group_users(target_group)
+        
+        # 获取最近7天的事件
+        seven_days_ago = int(time.time()) - 7 * 24 * 60 * 60
+        recent_events = stats_manager.get_events("GROUP_AT_MESSAGE_CREATE", limit=1000)
+        
+        # 统计该群组的最近消息
+        group_messages = []
+        for event in recent_events:
+            data = event.get("data", {})
+            event_time = event.get("time", 0)
+            if data.get("group_id") == target_group and event_time >= seven_days_ago:
+                group_messages.append(event)
+        
+        # 生成报告
+        group_name = group_info.get("name", target_group)
+        join_time = group_info.get("join_time", 0)
+        join_time_str = datetime.fromtimestamp(join_time).strftime("%Y-%m-%d %H:%M:%S") if join_time else "未知"
+        
+        return f"群组活跃度报告 - {group_name}\n" \
+               f"群ID: {target_group}\n" \
+               f"加入时间: {join_time_str}\n" \
+               f"成员数: {len(users)}\n" \
+               f"7天内消息: {len(group_messages)} 条\n" \
+               f"人均消息: {len(group_messages) / len(users) if users else 0:.2f} 条/人"
+```
 
 ## 进阶功能
 
