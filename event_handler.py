@@ -7,8 +7,7 @@ import asyncio
 from message import MessageSender
 from auth_manager import auth_manager
 import traceback
-from typing import Optional, Dict, Any
-from stats_manager import stats_manager
+from typing import Optional
 
 # 配置日志
 logger = logging.getLogger("event_handler")
@@ -33,21 +32,11 @@ class EventHandler:
             "GROUP_MSG_RECEIVE": self.handle_group_msg_receive,
             "READY": self.handle_ready,
             "RESUMED": self.handle_resumed,
-            # 新增QQ官方事件处理
-            "GROUP_ADD_ROBOT": self.handle_group_add_robot,
-            "GROUP_DEL_ROBOT": self.handle_group_del_robot,
-            "FRIEND_ADD": self.handle_friend_add,
-            "FRIEND_DEL": self.handle_friend_del,
-            "C2C_MSG_REJECT": self.handle_c2c_msg_reject,
-            "C2C_MSG_RECEIVE": self.handle_c2c_msg_receive,
         }
         
         # AI聊天插件实例（仅当功能启用时）
         self.ai_chat_plugin = None
         self._load_ai_plugin_if_needed()
-        
-        # 初始化统计管理器的自动保存功能
-        asyncio.create_task(stats_manager.start_auto_save())
 
     def _load_ai_plugin_if_needed(self):
         """尝试加载AI聊天插件"""
@@ -79,9 +68,6 @@ class EventHandler:
         """处理事件分发"""
         self.logger.info(f"收到事件: {event_type}")
         
-        # 记录事件到统计系统
-        await self._record_event_stats(event_type, event_data)
-        
         # 特殊处理 C2C 事件，如果 DIRECT_MESSAGE_CREATE 能处理就用它
         if event_type == "C2C_MESSAGE_CREATE" and "DIRECT_MESSAGE_CREATE" in self.event_handlers:
              event_type = "DIRECT_MESSAGE_CREATE"
@@ -98,48 +84,8 @@ class EventHandler:
                 return False
         else:
             self.logger.info(f"暂未支持的事件类型: {event_type}")
-            # 记录未处理的事件类型
-            await stats_manager.add_event(f"UNHANDLED_{event_type}", event_data)
             return False
     
-    async def _record_event_stats(self, event_type: str, event_data: Dict[str, Any]):
-        """记录事件到统计系统"""
-        try:
-            # 记录原始事件
-            await stats_manager.add_event(event_type, event_data)
-            
-            # 根据事件类型进行特殊处理
-            if event_type == "GROUP_AT_MESSAGE_CREATE" or event_type == "AT_MESSAGE_CREATE":
-                # 提取发送者信息
-                user_id = self._get_user_id(event_data)
-                if user_id:
-                    # 提取更多用户信息（如头像、昵称等）
-                    user_metadata = self._extract_user_metadata(event_data)
-                    await stats_manager.add_user(user_id, metadata=user_metadata)
-                
-                # 提取群组信息
-                group_id = event_data.get("group_openid")
-                if group_id:
-                    # 提取群组元数据
-                    group_metadata = self._extract_group_metadata(event_data)
-                    # 更新群组活跃时间
-                    await stats_manager.add_group(group_id, metadata=group_metadata)
-                    
-                    # 如果有用户ID，建立用户和群组的关系
-                    if user_id:
-                        await stats_manager.add_user_to_group(group_id, user_id)
-            
-            elif event_type == "DIRECT_MESSAGE_CREATE" or event_type == "C2C_MESSAGE_CREATE":
-                # 提取发送者信息
-                user_id = self._get_user_id(event_data)
-                if user_id:
-                    # 提取更多用户信息
-                    user_metadata = self._extract_user_metadata(event_data)
-                    await stats_manager.add_user(user_id, metadata=user_metadata)
-        except Exception as e:
-            self.logger.error(f"记录事件统计时出错: {e}")
-            self.logger.error(traceback.format_exc())
-
     def _get_user_id(self, data):
         """从事件数据中提取用户ID (优先author.id，然后是openid)"""
         author = data.get("author", {})
@@ -323,61 +269,21 @@ class EventHandler:
     async def handle_group_msg_reject(self, data):
         """处理群聊拒绝机器人主动消息事件"""
         self.logger.info(f"群聊拒绝机器人主动消息: {data}")
-        group_id = data.get("group_openid")
-        op_member_openid = data.get("op_member_openid")
-        
-        if group_id:
-            # 更新群组状态
-            if op_member_openid:
-                # 将操作者记录为用户
-                await stats_manager.add_user(op_member_openid)
-                
-            # 更新群组信息，标记为拒绝主动消息
-            group_info = stats_manager.get_group(group_id)
-            if group_info:
-                await stats_manager.add_group(
-                    group_id,
-                    metadata={"allow_active_messages": False}
-                )
-        
         return True
     
     async def handle_group_msg_receive(self, data):
         """处理群聊接受机器人主动消息事件"""
         self.logger.info(f"群聊接受机器人主动消息: {data}")
-        group_id = data.get("group_openid")
-        op_member_openid = data.get("op_member_openid")
-        
-        if group_id:
-            # 更新群组状态
-            if op_member_openid:
-                # 将操作者记录为用户
-                await stats_manager.add_user(op_member_openid)
-                
-            # 更新群组信息，标记为接受主动消息
-            await stats_manager.add_group(
-                group_id,
-                metadata={"allow_active_messages": True}
-            )
-        
         return True
     
     async def handle_ready(self, data):
-        """处理READY事件"""
-        self.logger.info(f"收到READY事件: {data}")
-        # 记录机器人上线事件
-        await stats_manager.add_event("BOT_ONLINE", {
-            "time": data.get("session_id", "unknown")
-        })
+        """处理准备就绪事件"""
+        self.logger.info(f"机器人就绪: {data}")
         return True
     
     async def handle_resumed(self, data):
-        """处理RESUMED事件"""
-        self.logger.info(f"收到RESUMED事件: {data}")
-        # 记录机器人恢复连接事件
-        await stats_manager.add_event("BOT_RESUMED", {
-            "data": data
-        })
+        """处理恢复连接事件"""
+        self.logger.info("连接已恢复")
         return True
     
     async def _process_command(self, content, data, user_id=None):
@@ -537,227 +443,6 @@ class EventHandler:
         except Exception as e:
             self.logger.error(f"发送回复时出错: {e}")
             self.logger.error(traceback.format_exc())
-
-    # 以下是新增的事件处理方法
-    
-    async def handle_group_add_robot(self, data):
-        """处理机器人被添加到群聊事件"""
-        self.logger.info(f"机器人被添加到群聊: {data}")
-        group_id = data.get("group_openid")
-        op_member_openid = data.get("op_member_openid")
-        timestamp = data.get("timestamp")
-        
-        if group_id:
-            # 记录群组信息
-            metadata = {"join_timestamp": timestamp} if timestamp else {}
-            
-            # 添加群组到统计
-            await stats_manager.add_group(
-                group_id,
-                added_by=op_member_openid,
-                metadata=metadata
-            )
-            
-            # 如果有操作者，记录用户信息
-            if op_member_openid:
-                await stats_manager.add_user(op_member_openid)
-                # 建立用户与群组的关系
-                await stats_manager.add_user_to_group(group_id, op_member_openid)
-                
-            # 尝试向群组发送欢迎消息
-            try:
-                welcome_msg = "感谢邀请我加入本群！我是一个QQ机器人，发送 /help 可查看我的功能列表。"
-                await asyncio.to_thread(MessageSender.send_group_message, group_id, "text", welcome_msg)
-                self.logger.info(f"已向群组 {group_id} 发送欢迎消息")
-            except Exception as e:
-                self.logger.error(f"发送欢迎消息失败: {e}")
-        
-        return True
-    
-    async def handle_group_del_robot(self, data):
-        """处理机器人被移出群聊事件"""
-        self.logger.info(f"机器人被移出群聊: {data}")
-        group_id = data.get("group_openid")
-        op_member_openid = data.get("op_member_openid")
-        timestamp = data.get("timestamp")
-        
-        if group_id:
-            # 记录移除原因
-            reason = "被管理员移除"
-            if op_member_openid:
-                reason += f"（操作者: {op_member_openid}）"
-            
-            # 更新群组状态
-            await stats_manager.remove_group(
-                group_id,
-                reason=reason,
-                removed_by=op_member_openid
-            )
-            
-            # 如果有操作者，记录用户信息
-            if op_member_openid:
-                await stats_manager.add_user(op_member_openid)
-        
-        return True
-    
-    async def handle_friend_add(self, data):
-        """处理用户添加机器人好友事件"""
-        self.logger.info(f"用户添加机器人好友: {data}")
-        user_id = data.get("openid")
-        timestamp = data.get("timestamp")
-        
-        if user_id:
-            # 记录用户信息
-            metadata = {
-                "is_friend": True,
-                "friend_add_time": timestamp
-            }
-            
-            await stats_manager.add_user(user_id, metadata=metadata)
-            
-            # 尝试向用户发送欢迎消息
-            try:
-                welcome_msg = "你好！很高兴认识你。我是一个QQ机器人，发送 /help 可查看我的功能列表。"
-                await asyncio.to_thread(MessageSender.send_private_message, user_id, welcome_msg)
-                self.logger.info(f"已向用户 {user_id} 发送欢迎消息")
-            except Exception as e:
-                self.logger.error(f"发送欢迎消息失败: {e}")
-        
-        return True
-    
-    async def handle_friend_del(self, data):
-        """处理用户删除机器人好友事件"""
-        self.logger.info(f"用户删除机器人好友: {data}")
-        user_id = data.get("openid")
-        timestamp = data.get("timestamp")
-        
-        if user_id:
-            # 更新用户状态
-            user_info = stats_manager.get_user(user_id)
-            if user_info:
-                metadata = {
-                    "is_friend": False,
-                    "friend_del_time": timestamp
-                }
-                await stats_manager.add_user(user_id, metadata=metadata)
-        
-        return True
-    
-    async def handle_c2c_msg_reject(self, data):
-        """处理用户拒绝机器人主动消息事件"""
-        self.logger.info(f"用户拒绝机器人主动消息: {data}")
-        user_id = data.get("openid")
-        timestamp = data.get("timestamp")
-        
-        if user_id:
-            # 更新用户状态
-            metadata = {
-                "allow_active_messages": False,
-                "reject_time": timestamp
-            }
-            await stats_manager.add_user(user_id, metadata=metadata)
-        
-        return True
-    
-    async def handle_c2c_msg_receive(self, data):
-        """处理用户接受机器人主动消息事件"""
-        self.logger.info(f"用户接受机器人主动消息: {data}")
-        user_id = data.get("openid")
-        timestamp = data.get("timestamp")
-        
-        if user_id:
-            # 更新用户状态
-            metadata = {
-                "allow_active_messages": True,
-                "receive_time": timestamp
-            }
-            await stats_manager.add_user(user_id, metadata=metadata)
-        
-        return True
-
-    def _extract_user_metadata(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        从事件数据中提取用户元数据
-        
-        Args:
-            data: 事件数据
-            
-        Returns:
-            用户元数据字典
-        """
-        metadata = {}
-        
-        # 从author字段提取信息
-        author = data.get("author", {})
-        if author:
-            # 提取用户名
-            if "username" in author:
-                metadata["name"] = author["username"]
-            
-            # 提取头像URL
-            if "avatar" in author:
-                metadata["avatar"] = author["avatar"]
-                
-            # 提取是否为机器人
-            if "bot" in author:
-                metadata["is_bot"] = author["bot"]
-        
-        # 从user字段提取信息
-        user = data.get("user", {})
-        if user:
-            # 提取用户名
-            if "username" in user and "name" not in metadata:
-                metadata["name"] = user["username"]
-            
-            # 提取头像URL
-            if "avatar" in user and "avatar" not in metadata:
-                metadata["avatar"] = user["avatar"]
-        
-        # 从member字段提取信息（群成员）
-        member = data.get("member", {})
-        if member:
-            # 提取用户昵称
-            if "nick" in member and "name" not in metadata:
-                metadata["name"] = member["nick"]
-                
-            # 提取头像URL
-            if "avatar" in member and "avatar" not in metadata:
-                metadata["avatar"] = member["avatar"]
-                
-            # 提取加入时间
-            if "joined_at" in member:
-                metadata["joined_at"] = member["joined_at"]
-        
-        return metadata
-        
-    def _extract_group_metadata(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        从事件数据中提取群组元数据
-        
-        Args:
-            data: 事件数据
-            
-        Returns:
-            群组元数据字典
-        """
-        metadata = {}
-        
-        # 提取群组名称
-        if "group_name" in data:
-            metadata["name"] = data["group_name"]
-            
-        # 提取群组头像
-        if "group_avatar" in data:
-            metadata["avatar"] = data["group_avatar"]
-            
-        # 从频道数据提取信息
-        channel = data.get("channel", {})
-        if channel:
-            # 提取频道名称
-            if "name" in channel and "name" not in metadata:
-                metadata["name"] = channel["name"]
-        
-        return metadata
 
 # 创建事件处理器实例
 event_handler = EventHandler()

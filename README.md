@@ -5,18 +5,6 @@ qq交流群:330316577
 
 [![Python Version](https://img.shields.io/badge/python-3.7%2B-blue)]()
 
-## 功能特点
-
-- 支持多种通信模式：WebSocket和Webhook
-- 插件系统：简单易用的插件开发框架
-- 权限管理：设置管理员权限控制特定命令
-- 命令处理：自动解析和处理群聊和私聊命令
-- 消息发送：支持文本、图片等多种消息类型
-- AI聊天：可集成OpenAI或其他兼容API的AI对话功能
-- 私聊支持：支持通过私聊与机器人交互
-- 统计系统：记录群组、用户和事件数据，提供详细统计信息
-- 完整的QQ机器人事件支持：包括群聊、私聊、加好友、入群等事件
-
 ## 特性
 
 - 🔌 **双模通信**: 支持 WebSocket 和 Webhook 两种通信方式，可通过配置文件轻松切换
@@ -78,27 +66,7 @@ cp .env.example .env
 
 ## 配置
 
-1. 打开 `.env` 文件，填写以下信息：
-
-```
-#v1.0.3
-BOT_APPID=你的机器人AppID
-BOT_APPSECRET=你的机器人AppSecret
-BOT_TOKEN=你的机器人Token
-
-# 通信模式: "webhook" 或 "websocket"
-COMM_MODE=websocket
-
-# Webhook相关设置（仅在COMM_MODE=webhook时使用）
-WEBHOOK_HOST=0.0.0.0
-WEBHOOK_PORT=8080
-WEBHOOK_PATH=/webhook/callback
-# 如果使用内网穿透，请填写公网URL，否则留空
-WEBHOOK_FULL_URL=https://example.com/webhook/callback
-
-# 命令规范化设置：设置为true时，所有命令必须以/开头；设置为false时，允许不带/前缀的命令
-ENFORCE_COMMAND_PREFIX=true
-```
+1. 打开 `.env` 文件，填写所需信息
 
 2. 如果使用 Webhook 模式，需要确保安装了相关依赖：
 
@@ -237,67 +205,3 @@ GPL-3.0 license
 ## 联系方式
 
 如有问题或建议，欢迎提交 issue 或联系我们。 
-
-## 支持的事件列表
-
-HiklQQBot支持以下QQ官方事件：
-
-- `GROUP_AT_MESSAGE_CREATE`: 群聊@机器人消息
-- `DIRECT_MESSAGE_CREATE`: 私聊消息
-- `C2C_MESSAGE_CREATE`: 单聊消息 
-- `GROUP_ADD_ROBOT`: 机器人被添加到群聊
-- `GROUP_DEL_ROBOT`: 机器人被移出群聊
-- `GROUP_MSG_REJECT`: 群聊拒绝机器人主动消息
-- `GROUP_MSG_RECEIVE`: 群聊接受机器人主动消息
-- `FRIEND_ADD`: 用户添加机器人好友
-- `FRIEND_DEL`: 用户删除机器人好友
-- `C2C_MSG_REJECT`: 用户拒绝机器人主动消息
-- `C2C_MSG_RECEIVE`: 用户接受机器人主动消息
-- `READY`: 机器人就绪事件
-- `RESUMED`: 连接恢复事件
-
-## 统计系统
-
-HiklQQBot包含一个强大的统计系统，用于记录和分析机器人的使用情况：
-
-### 统计的数据
-
-- **群组统计**：记录机器人加入的所有群组信息，包括加入时间、活跃状态等
-- **用户统计**：记录所有与机器人互动的用户信息
-- **群组-用户关系**：记录每个群组中的用户数据
-- **事件统计**：记录所有事件类型和数量
-
-### 统计命令
-
-使用 `/stats` 命令可以查看统计信息：
-
-- `/stats summary` - 显示统计摘要（默认）
-- `/stats groups` - 显示群组统计
-- `/stats users` - 显示用户统计
-- `/stats events` - 显示事件统计
-
-管理员可使用更多高级命令：
-
-- `/stats group <群ID>` - 显示特定群组详情
-- `/stats user <用户ID>` - 显示特定用户详情
-- `/stats events <事件类型>` - 显示特定事件类型的详情
-
-### 插件API
-
-插件可以通过统计管理器访问统计数据：
-
-```python
-from stats_manager import stats_manager
-
-# 获取群组信息
-group_info = stats_manager.get_group(group_id)
-
-# 获取用户信息
-user_info = stats_manager.get_user(user_id)
-
-# 获取群组中的所有用户
-users_in_group = stats_manager.get_group_users(group_id)
-
-# 获取统计摘要
-summary = stats_manager.get_stats_summary()
-``` 

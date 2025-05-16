@@ -4,12 +4,10 @@ import pkgutil
 import inspect
 import os
 import sys
-import time
 from typing import Dict, List, Type, Optional
 
 from .base_plugin import BasePlugin
 from auth_manager import auth_manager
-from stats_manager import stats_manager
 
 logger = logging.getLogger("plugin_manager")
 
@@ -282,62 +280,41 @@ class PluginManager:
         Args:
             command: 命令名称
             params: 命令参数
-            user_id: 用户ID
-            **kwargs: 其他参数
+            user_id: 用户ID，用于权限控制
+            **kwargs: 额外参数，如group_openid等
             
         Returns:
-            命令处理结果
+            处理结果
         """
-        # 如果命令不以/开头且启用了命令前缀规范，则添加前缀
+        self.logger.info(f"处理命令: {command}, 参数: {params}, 用户ID: {user_id}, 额外参数: {kwargs}")
+        
+        # 检查维护模式
+        if auth_manager.is_maintenance_mode() and not auth_manager.is_admin(user_id):
+            return "机器人当前处于维护模式，仅管理员可用"
+        
+        # 根据配置处理命令前缀
+        # 如果强制规范化打开，但命令不以/开头，自动添加/
         if ENFORCE_COMMAND_PREFIX and not command.startswith('/'):
-            command = f"/{command}"
-            
+            command = f'/{command}'
+        
         plugin = self.get_plugin(command)
         if not plugin:
-            return f"未知命令: {command}，输入 /help 查看可用命令"
+            # 如果找不到命令，且命令以/开头，尝试查找不带/的版本（兼容模式）
+            if command.startswith('/') and not ENFORCE_COMMAND_PREFIX:
+                plain_command = command[1:]
+                plugin = self.get_plugin(plain_command)
             
-        # 检查权限
-        if plugin.admin_only and not auth_manager.is_admin(user_id):
-            return "此命令仅管理员可用"
-            
-        # 记录命令使用统计
-        group_openid = kwargs.get("group_openid")
-        await self._record_command_stats(command, user_id, group_openid)
-            
+            # 命令不存在，返回提示信息
+            if not plugin:
+                return f"未找到命令: {command}\n你可以通过 /help 获取可用命令列表"
+        
         try:
-            return await plugin.handle(params, user_id=user_id, **kwargs)
+            # 将额外参数传递给插件的handle方法
+            return await plugin.handle(params, user_id, **kwargs)
         except Exception as e:
-            self.logger.error(f"处理命令 {command} 时出错: {e}")
-            return f"处理命令时出错: {str(e)}"
-            
-    async def _record_command_stats(self, command: str, user_id: Optional[str], group_openid: Optional[str]):
-        """记录命令使用统计"""
-        try:
-            # 记录事件
-            event_data = {
-                "command": command,
-                "user_id": user_id
-            }
-            
-            if group_openid:
-                event_data["group_id"] = group_openid
-                
-            await stats_manager.add_event("COMMAND_USAGE", event_data)
-            
-            # 更新用户活跃时间
-            if user_id:
-                await stats_manager.add_user(user_id)
-                
-            # 更新群组活跃时间
-            if group_openid:
-                await stats_manager.add_group(group_openid)
-                
-                # 关联用户和群组
-                if user_id:
-                    await stats_manager.add_user_to_group(group_openid, user_id)
-                    
-        except Exception as e:
-            self.logger.error(f"记录命令统计失败: {e}")
+            error_msg = f"处理命令 {command} 时出错: {str(e)}"
+            self.logger.error(error_msg)
+            return f"执行命令出错: {str(e)}"
 
 # 创建全局插件管理器实例
 plugin_manager = PluginManager() 
