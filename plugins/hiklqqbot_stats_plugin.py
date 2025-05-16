@@ -97,8 +97,7 @@ class HiklqqbotStatsPlugin(BasePlugin):
                 member_count = len(group_info.get("members", []))
                 
                 result += f"{i}. 群ID: {group_id}\n"
-                result += f"   名称: {group_info.get('name', '群组')}\n"
-                result += f"   成员: {member_count} 人\n"
+                result += f"   成员数: {member_count} 人\n"
                 result += f"   加入时间: {join_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 result += f"   最后活跃: {last_active.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             
@@ -132,7 +131,6 @@ class HiklqqbotStatsPlugin(BasePlugin):
                 last_active = datetime.fromtimestamp(user_info.get("last_active", 0))
                 
                 result += f"{i}. 用户ID: {user_id}\n"
-                result += f"   名称: {user_info.get('name', '名称')}\n"
                 result += f"   首次见到: {first_seen.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 result += f"   最后活跃: {last_active.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             
@@ -175,15 +173,11 @@ class HiklqqbotStatsPlugin(BasePlugin):
             
             result += "\n最活跃群组 (Top 5):\n"
             for i, (group_id, count) in enumerate(active_groups, 1):
-                group_info = stats_manager.get_group(group_id)
-                group_name = group_info.get("name", "名称") if group_info else "名称"
-                result += f"{i}. {group_name} ({group_id}): {count} 条消息\n"
+                result += f"{i}. 群ID: {group_id}: {count} 条消息\n"
             
             result += "\n最活跃用户 (Top 5):\n"
             for i, (user_id, count) in enumerate(active_users, 1):
-                user_info = stats_manager.get_user(user_id)
-                user_name = user_info.get("name", "名称") if user_info else "名称"
-                result += f"{i}. {user_name} ({user_id}): {count} 条消息\n"
+                result += f"{i}. 用户ID: {user_id}: {count} 条消息\n"
             
             return result
         except Exception as e:
@@ -205,7 +199,6 @@ class HiklqqbotStatsPlugin(BasePlugin):
             result = f"群组详细信息 ({group_id}):\n\n"
             
             # 基本信息
-            result += f"名称: {group_info.get('name', '名称')}\n"
             join_time = datetime.fromtimestamp(group_info.get("join_time", 0))
             result += f"加入时间: {join_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
             
@@ -215,9 +208,7 @@ class HiklqqbotStatsPlugin(BasePlugin):
             # 添加者信息
             added_by = group_info.get("added_by")
             if added_by:
-                adder_info = stats_manager.get_user(added_by)
-                adder_name = adder_info.get("name", "名称") if adder_info else "名称"
-                result += f"添加者: {adder_name} ({added_by})\n"
+                result += f"添加者ID: {added_by}\n"
             
             # 成员信息
             members = group_info.get("members", [])
@@ -225,11 +216,9 @@ class HiklqqbotStatsPlugin(BasePlugin):
             
             # 显示部分成员信息
             if members:
-                result += "\n成员列表 (最多显示10个):\n"
+                result += "\n成员ID列表 (最多显示10个):\n"
                 for i, member_id in enumerate(members[:10], 1):
-                    member_info = stats_manager.get_user(member_id)
-                    member_name = member_info.get("name", "名称") if member_info else "名称"
-                    result += f"{i}. {member_name} ({member_id})\n"
+                    result += f"{i}. {member_id}\n"
                 
                 if len(members) > 10:
                     result += f"...以及其他 {len(members) - 10} 名成员"
@@ -254,8 +243,6 @@ class HiklqqbotStatsPlugin(BasePlugin):
             result = f"用户详细信息 ({user_id}):\n\n"
             
             # 基本信息
-            result += f"名称: {user_info.get('name', '名称')}\n"
-            
             first_seen = datetime.fromtimestamp(user_info.get("first_seen", 0))
             result += f"首次见到: {first_seen.strftime('%Y-%m-%d %H:%M:%S')}\n"
             
@@ -279,11 +266,9 @@ class HiklqqbotStatsPlugin(BasePlugin):
             result += f"\n所在群组数: {len(user_groups)}\n"
             
             if user_groups:
-                result += "\n所在群组列表:\n"
+                result += "\n所在群组ID列表:\n"
                 for i, group_id in enumerate(user_groups[:5], 1):
-                    group_info = stats_manager.get_group(group_id)
-                    group_name = group_info.get("name", "名称") if group_info else "名称"
-                    result += f"{i}. {group_name} ({group_id})\n"
+                    result += f"{i}. {group_id}\n"
                 
                 if len(user_groups) > 5:
                     result += f"...以及其他 {len(user_groups) - 5} 个群组"
