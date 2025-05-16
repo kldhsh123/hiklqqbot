@@ -42,6 +42,10 @@ class StatsManager:
         
         # 加载数据
         self._load_data()
+        
+        # 同步用户和群组数据
+        self._sync_group_user_data()
+        
         self.initialized = True
         
     def _load_data(self):
@@ -74,6 +78,62 @@ class StatsManager:
                 json.dump(self.usage_stats, f, ensure_ascii=False, indent=2)
         except Exception as e:
             self.logger.error(f"保存统计数据失败: {e}")
+    
+    def _sync_group_user_data(self):
+        """同步群组成员和用户群组列表数据"""
+        self.logger.info("开始同步群组和用户数据...")
+        changes_made = False
+        
+        # 遍历所有群组
+        for group_id, group_info in self.groups.items():
+            members = group_info.get("members", [])
+            
+            # 遍历每个群组的成员
+            for member_id in members:
+                if member_id in self.users:
+                    # 确保用户有groups字段
+                    if "groups" not in self.users[member_id]:
+                        self.users[member_id]["groups"] = []
+                    
+                    # 将群组添加到用户的groups列表（如果不存在）
+                    if group_id not in self.users[member_id]["groups"]:
+                        self.users[member_id]["groups"].append(group_id)
+                        self.logger.debug(f"将群组 {group_id} 添加到用户 {member_id} 的群组列表")
+                        changes_made = True
+        
+        # 遍历所有用户
+        for user_id, user_info in self.users.items():
+            user_groups = user_info.get("groups", [])
+            
+            # 确保所有用户都有groups字段
+            if "groups" not in user_info:
+                user_info["groups"] = []
+                changes_made = True
+            
+            # 遍历用户的每个群组
+            for group_id in list(user_groups):  # 使用列表副本，因为可能会在循环中修改
+                # 检查群组是否存在
+                if group_id not in self.groups:
+                    # 如果群组不存在，从用户的groups列表中移除
+                    user_info["groups"].remove(group_id)
+                    self.logger.debug(f"从用户 {user_id} 的群组列表中移除不存在的群组 {group_id}")
+                    changes_made = True
+                    continue
+                
+                # 检查用户是否在群组的成员列表中
+                if user_id not in self.groups[group_id].get("members", []):
+                    # 如果用户不在群组的成员列表中，将其添加
+                    if "members" not in self.groups[group_id]:
+                        self.groups[group_id]["members"] = []
+                    self.groups[group_id]["members"].append(user_id)
+                    self.logger.debug(f"将用户 {user_id} 添加到群组 {group_id} 的成员列表")
+                    changes_made = True
+        
+        if changes_made:
+            self.logger.info("数据同步完成，发现并修复了不一致")
+            self._save_data()
+        else:
+            self.logger.info("数据同步完成，未发现不一致")
     
     # 群组相关方法
     def add_group(self, group_openid: str, name: str = None, op_member_openid: str = None):
@@ -120,6 +180,15 @@ class StatsManager:
             if user_openid not in self.groups[group_openid]["members"]:
                 self.groups[group_openid]["members"].append(user_openid)
                 self.logger.debug(f"将用户 {user_openid} 添加到群组 {group_openid}")
+                
+                # 同时更新用户的群组列表
+                if user_openid in self.users:
+                    if "groups" not in self.users[user_openid]:
+                        self.users[user_openid]["groups"] = []
+                    if group_openid not in self.users[user_openid]["groups"]:
+                        self.users[user_openid]["groups"].append(group_openid)
+                        self.logger.debug(f"将群组 {group_openid} 添加到用户 {user_openid} 的群组列表")
+                
                 self._save_data()
                 return True
         return False
@@ -129,6 +198,13 @@ class StatsManager:
         if group_openid in self.groups and user_openid in self.groups[group_openid]["members"]:
             self.groups[group_openid]["members"].remove(user_openid)
             self.logger.debug(f"从群组 {group_openid} 移除用户 {user_openid}")
+            
+            # 同时从用户的群组列表中移除该群组
+            if user_openid in self.users and "groups" in self.users[user_openid]:
+                if group_openid in self.users[user_openid]["groups"]:
+                    self.users[user_openid]["groups"].remove(group_openid)
+                    self.logger.debug(f"从用户 {user_openid} 的群组列表中移除群组 {group_openid}")
+            
             self._save_data()
             return True
         return False
@@ -146,7 +222,7 @@ class StatsManager:
         
         if user_openid not in self.users:
             self.users[user_openid] = {
-                "name": name or "群组",
+                "name": name or "用户",
                 "avatar": avatar,
                 "first_seen": current_time,
                 "last_active": current_time,
@@ -159,6 +235,9 @@ class StatsManager:
                 self.users[user_openid]["name"] = name
             if avatar:
                 self.users[user_openid]["avatar"] = avatar
+            # 确保用户有groups字段
+            if "groups" not in self.users[user_openid]:
+                self.users[user_openid]["groups"] = []
         
         self._save_data()
         return self.users[user_openid]
@@ -226,7 +305,23 @@ class StatsManager:
     
     def handle_group_del_robot(self, group_openid: str, op_member_openid: str, timestamp: int):
         """处理机器人退出群聊事件"""
-        return self.remove_group(group_openid)
+        # 获取群组成员，然后再移除群组
+        members = self.get_group_members(group_openid).copy() if group_openid in self.groups else []
+        
+        # 从所有群成员的群组列表中移除该群组
+        for member_id in members:
+            if member_id in self.users and "groups" in self.users[member_id]:
+                if group_openid in self.users[member_id]["groups"]:
+                    self.users[member_id]["groups"].remove(group_openid)
+                    self.logger.debug(f"从用户 {member_id} 的群组列表中移除群组 {group_openid}")
+        
+        # 移除群组
+        if group_openid in self.groups:
+            del self.groups[group_openid]
+            self.logger.info(f"移除群组: {group_openid}")
+            self._save_data()
+            return True
+        return False
     
     def handle_friend_add(self, user_openid: str, timestamp: int):
         """处理用户添加机器人事件"""
