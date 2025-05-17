@@ -293,7 +293,7 @@ class EventHandler:
 
         await self._process_command(content, data, user_id)
         return True
-
+    
     async def handle_ready(self, data):
         """处理准备就绪事件"""
         self.logger.info(f"机器人就绪: {data}")
@@ -303,7 +303,7 @@ class EventHandler:
         """处理恢复连接事件"""
         self.logger.info("连接已恢复")
         return True
-
+    
     async def _process_command(self, content, data, user_id=None):
         """处理命令，找到插件或特殊命令（如/help）则创建后台任务执行"""
         clean_content = re.sub(r'<@!\d+>', '', content).strip()
@@ -399,7 +399,7 @@ class EventHandler:
         if plugin:
             group_openid = data.get("group_openid")
             stats_manager.log_command(plugin.command, user_id, group_openid)
-            
+        
         if plugin:
             # 找到插件，启动后台任务处理
             self.logger.info(f"为命令 '{command}' 找到插件 '{plugin.__class__.__name__}'，创建后台处理任务")
