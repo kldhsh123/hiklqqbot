@@ -200,14 +200,14 @@ class WebSocketClient:
         """处理分发事件"""
         try:
             event_type = data.get("t", None)
-        event_data = data.get("d", {})
-        
+            event_data = data.get("d", {})
+            
             if event_type:
-        logger.info(f"收到事件: {event_type}")
-        
+                logger.info(f"收到事件: {event_type}")
+                
                 # 处理会话ID (用于断线重连)
-        if event_type == "READY":
-            self.session_id = event_data.get("session_id")
+                if event_type == "READY":
+                    self.session_id = event_data.get("session_id")
                     logger.info(f"已准备就绪，会话ID: {self.session_id}")
                 
                 # 使用事件处理器处理所有类型的事件
@@ -219,9 +219,9 @@ class WebSocketClient:
                     await event_handler.handle_event(event_type, event_data)
                 except Exception as e:
                     logger.error(f"事件处理失败 ({event_type}): {e}")
-        else:
+            else:
                 logger.warning(f"收到没有事件类型的消息: {data}")
-            except Exception as e:
+        except Exception as e:
             logger.error(f"分发事件异常: {e}")
     
     async def reconnect(self):
