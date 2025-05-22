@@ -1,6 +1,9 @@
 import time
 import requests
 from config import BOT_APPID, BOT_APPSECRET, API_AUTH_URL, BOT_TOKEN
+import logging
+
+logger = logging.getLogger("auth")
 
 class Auth:
     def __init__(self):
@@ -25,6 +28,10 @@ class Auth:
         if response.status_code != 200:
             raise Exception(f"获取访问令牌失败: {response.text}")
         
+        trace_id = response.headers.get("X-Tps-trace-ID")
+        if trace_id:
+            logger.debug(f"X-Tps-trace-ID: {trace_id}")
+            
         result = response.json()
         self.access_token = result['access_token']
         self.expires_at = current_time + result.get('expires_in', 7200)

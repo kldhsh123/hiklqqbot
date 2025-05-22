@@ -69,6 +69,9 @@ class MessageSender:
             response = requests.post(api_url, headers=headers, json=data)
             logger.info(f"API响应状态码: {response.status_code}")
             logger.info(f"API响应内容: {response.text}")
+            trace_id = response.headers.get("X-Tps-trace-ID")
+            if trace_id:
+                logger.debug(f"X-Tps-trace-ID: {trace_id}")
             
             if response.status_code != 200:
                 logger.error(f"发送消息失败: {response.text}")
@@ -119,6 +122,9 @@ class MessageSender:
             response = requests.post(api_url, headers=headers, json=data)
             logger.info(f"API响应状态码: {response.status_code}")
             logger.info(f"API响应内容: {response.text}")
+            trace_id = response.headers.get("X-Tps-trace-ID")
+            if trace_id:
+                logger.debug(f"X-Tps-trace-ID: {trace_id}")
             
             if response.status_code != 200:
                 logger.error(f"回复消息失败: {response.text}")
@@ -189,6 +195,9 @@ class MessageSender:
             response = requests.post(api_url, headers=headers, json=data)
             logger.info(f"API响应状态码: {response.status_code}")
             logger.info(f"API响应内容: {response.text}")
+            trace_id = response.headers.get("X-Tps-trace-ID")
+            if trace_id:
+                logger.debug(f"X-Tps-trace-ID: {trace_id}")
             
             if response.status_code != 200:
                 logger.error(f"发送私聊消息失败: {response.text}")
@@ -250,6 +259,9 @@ class MessageSender:
             response = requests.post(api_url, headers=headers, json=data)
             logger.info(f"API响应状态码: {response.status_code}")
             logger.info(f"API响应内容: {response.text}")
+            trace_id = response.headers.get("X-Tps-trace-ID")
+            if trace_id:
+                logger.debug(f"X-Tps-trace-ID: {trace_id}")
             
             if response.status_code != 200:
                 logger.error(f"回复私聊消息失败: {response.text}")
