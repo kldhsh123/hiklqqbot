@@ -33,6 +33,15 @@ class HiklqqbotAdminPlugin(BasePlugin):
         """
         self.logger.info(f"收到管理员管理命令，参数: {params}, 用户: {user_id}")
         
+        # 检查是否有任何管理员注册
+        current_admins = auth_manager.get_admins()
+        
+        # 如果没有管理员，则将当前用户设为第一个管理员
+        if not current_admins and user_id:
+            self.logger.info(f"没有管理员注册，将用户 {user_id} 设置为第一个管理员")
+            auth_manager.add_admin(user_id)
+            return f"您已被设置为系统的第一个管理员。\n您现在可以使用以下操作:\n- add <用户ID>: 添加管理员\n- remove <用户ID>: 删除管理员\n- reload: 重新加载管理员列表\n- 无参数: 显示当前管理员列表"
+        
         # 检查权限，仅允许当前管理员执行
         if not auth_manager.is_admin(user_id):
             return "您没有权限执行管理员命令"

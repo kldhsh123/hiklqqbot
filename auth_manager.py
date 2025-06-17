@@ -45,6 +45,14 @@ class AuthManager:
         except Exception as e:
             self.logger.error(f"保存管理员列表失败: {e}")
     
+    def reload_admins(self) -> None:
+        """
+        重新从文件加载管理员列表
+        """
+        self.logger.info("重新加载管理员列表...")
+        self._load_admins()
+        self.logger.info(f"管理员列表重新加载完成，共加载 {len(self.admins)} 个管理员")
+    
     def add_admin(self, user_id: str) -> bool:
         """
         添加管理员
