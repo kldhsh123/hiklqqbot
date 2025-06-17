@@ -254,7 +254,7 @@ HiklQQBot 框架内置了数据统计系统，用于记录和管理机器人的�
 统计系统主要包括以下功能：
 
 1. 记录机器人加入/退出的群组信息
-2. 记录用户信息，包括用户头像
+2. 记录用户信息
 3. 记录消息和命令使用统计
 4. 支持查询群组成员、用户信息等
 
@@ -279,19 +279,6 @@ class MyPlugin(BasePlugin):
             return f"你好，{user_name}！"
         else:
             return "未找到用户信息"
-```
-
-#### 获取用户头像
-
-```python
-class ProfilePlugin(BasePlugin):
-    async def handle(self, params: str, user_id: str = None, **kwargs) -> str:
-        # 获取用户信息
-        user_info = stats_manager.get_user(user_id)
-        if user_info and user_info.get("avatar"):
-            return f"你的头像链接是: {user_info['avatar']}"
-        else:
-            return "未找到你的头像信息"
 ```
 
 #### 获取群组信息和群组成员
@@ -407,7 +394,6 @@ class CustomPlugin(BasePlugin):
 - `stats_manager.add_user(user_openid, name=None, avatar=None)`: 添加或更新用户信息
 - `stats_manager.get_user(user_openid)`: 获取用户信息
 - `stats_manager.get_all_users()`: 获取所有用户信息
-- `stats_manager.update_user_avatar(user_openid, avatar_url)`: 更新用户头像
 
 #### 统计相关方法
 
@@ -670,19 +656,6 @@ async def handle(self, params: str, user_id: str = None, group_openid: str = Non
     
     member_ids = stats_manager.get_group_members(group_openid)
     return f"群组成员数: {len(member_ids)}"
-```
-
-### Q: 如何获取用户头像？
-
-**A**: 用户头像信息会被统计系统自动记录，您可以通过 `get_user` 方法获取：
-
-```python
-async def handle(self, params: str, user_id: str = None, **kwargs) -> str:
-    user_info = stats_manager.get_user(user_id)
-    if user_info and user_info.get("avatar"):
-        return f"你的头像: {user_info['avatar']}"
-    else:
-        return "未找到头像信息"
 ```
 
 ### Q: 如何编写支持交互式对话的插件？
