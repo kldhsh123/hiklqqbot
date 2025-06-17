@@ -67,21 +67,14 @@ class Auth:
         """获取包含认证信息的请求头
         
         Args:
-            use_bot_token (bool): 是否使用 Bot 令牌格式，用于某些 API
+            use_bot_token (bool): 之前参数用于区分是否使用Bot令牌格式，现在QQ已经统一要求使用AccessToken
         """
-        if use_bot_token:
-            # 使用 Bot 令牌格式
-            return {
-                "Authorization": f"Bot {BOT_APPID}.{BOT_TOKEN}",
-                "Content-Type": "application/json"
-            }
-        else:
-            # 使用 OAuth 令牌格式
-            token = self.get_access_token()
-            return {
-                "Authorization": f"QQBot {token}",
-                "Content-Type": "application/json"
-            }
+        # 获取动态令牌，不再区分令牌格式，QQ已禁用固定Token
+        token = self.get_access_token()
+        return {
+            "Authorization": f"QQBot {token}",
+            "Content-Type": "application/json"
+        }
 
 # 创建单例
 auth_manager = Auth() 
