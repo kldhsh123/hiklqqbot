@@ -272,3 +272,121 @@ class MessageSender:
         except Exception as e:
             logger.error(f"回复私聊消息异常: {str(e)}")
             raise 
+        
+    @staticmethod
+    def send_group_message_advanced(group_openid, message_content, message_type=0, markdown=None, keyboard=None, ark=None, media=None):
+        """
+        发送高级群聊消息，支持markdown、按钮等
+        
+        Args:
+            group_openid: 群的openid
+            message_content: 消息内容
+            message_type: 消息类型，0=文本，2=markdown，3=ark，4=embed，7=media富媒体
+            markdown: markdown对象
+            keyboard: 按钮对象
+            ark: ark对象
+            media: 富媒体对象
+            
+        Returns:
+            API响应结果
+        """
+        # 使用Bot令牌进行认证
+        headers = auth_manager.get_auth_header(use_bot_token=True)
+        
+        # 构建API URL
+        api_url = f"{API_BASE_URL}/v2/groups/{group_openid}/messages"
+        
+        # 构建请求数据
+        data = {
+            "content": message_content,
+            "msg_type": message_type
+        }
+        
+        # 添加可选参数
+        if markdown:
+            data["markdown"] = markdown
+        if keyboard:
+            data["keyboard"] = keyboard
+        if ark:
+            data["ark"] = ark
+        if media:
+            data["media"] = media
+            
+        logger.info(f"发送高级群聊消息到群 {group_openid}, 类型: {message_type}")
+        logger.info(f"群聊请求数据: {data}")
+        
+        try:
+            response = requests.post(api_url, headers=headers, json=data)
+            logger.info(f"API响应状态码: {response.status_code}")
+            logger.info(f"API响应内容: {response.text}")
+            
+            if response.status_code != 200:
+                logger.error(f"发送高级群聊消息失败: {response.text}")
+                raise Exception(f"发送高级群聊消息失败: {response.text}")
+            
+            logger.info("高级群聊消息发送成功")
+            return response.json()
+        except Exception as e:
+            logger.error(f"发送高级群聊消息异常: {str(e)}")
+            raise
+    
+    @staticmethod
+    def reply_group_message_advanced(group_openid, message_id, message_content, message_type=0, markdown=None, keyboard=None, ark=None, media=None, msg_seq=1):
+        """
+        回复高级群聊消息，支持markdown、按钮等
+        
+        Args:
+            group_openid: 群的openid
+            message_id: 要回复的消息ID
+            message_content: 消息内容
+            message_type: 消息类型，0=文本，2=markdown，3=ark，4=embed，7=media富媒体
+            markdown: markdown对象
+            keyboard: 按钮对象
+            ark: ark对象
+            media: 富媒体对象
+            msg_seq: 回复消息序号，默认为1
+            
+        Returns:
+            API响应结果
+        """
+        # 使用Bot令牌进行认证
+        headers = auth_manager.get_auth_header(use_bot_token=True)
+        
+        # 构建API URL
+        api_url = f"{API_BASE_URL}/v2/groups/{group_openid}/messages"
+        
+        # 构建请求数据
+        data = {
+            "content": message_content,
+            "msg_type": message_type,
+            "msg_id": message_id,
+            "msg_seq": msg_seq
+        }
+        
+        # 添加可选参数
+        if markdown:
+            data["markdown"] = markdown
+        if keyboard:
+            data["keyboard"] = keyboard
+        if ark:
+            data["ark"] = ark
+        if media:
+            data["media"] = media
+            
+        logger.info(f"回复高级群聊消息 {message_id} 到群 {group_openid}, 类型: {message_type}")
+        logger.info(f"群聊回复请求数据: {data}")
+        
+        try:
+            response = requests.post(api_url, headers=headers, json=data)
+            logger.info(f"API响应状态码: {response.status_code}")
+            logger.info(f"API响应内容: {response.text}")
+            
+            if response.status_code != 200:
+                logger.error(f"回复高级群聊消息失败: {response.text}")
+                raise Exception(f"回复高级群聊消息失败: {response.text}")
+            
+            logger.info("高级群聊消息回复成功")
+            return response.json()
+        except Exception as e:
+            logger.error(f"回复高级群聊消息异常: {str(e)}")
+            raise 
