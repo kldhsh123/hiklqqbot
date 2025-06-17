@@ -24,8 +24,15 @@ class Auth:
             "clientSecret": BOT_APPSECRET
         }
         
-        response = requests.post(API_AUTH_URL, json=data)
+        # 添加内容类型头
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(API_AUTH_URL, json=data, headers=headers)
         if response.status_code != 200:
+            logger.error(f"获取访问令牌失败: 状态码 {response.status_code}")
+            logger.error(f"响应内容: {response.text}")
             raise Exception(f"获取访问令牌失败: {response.text}")
         
         trace_id = response.headers.get("X-Tps-trace-ID")
@@ -33,9 +40,27 @@ class Auth:
             logger.debug(f"X-Tps-trace-ID: {trace_id}")
             
         result = response.json()
-        self.access_token = result['access_token']
-        self.expires_at = current_time + result.get('expires_in', 7200)
         
+        # 记录完整的响应以便调试
+        logger.debug(f"获取token响应: {result}")
+        
+        if 'access_token' not in result:
+            logger.error(f"访问令牌格式不正确: {result}")
+            raise Exception(f"访问令牌格式不正确: {result}")
+            
+        self.access_token = result['access_token']
+        
+        # 确保expires_in是整数类型
+        try:
+            expires_in = int(result.get('expires_in', 7200))
+        except (ValueError, TypeError):
+            logger.warning(f"无法将expires_in转换为整数，使用默认值7200: {result.get('expires_in')}")
+            expires_in = 7200
+            
+        self.expires_in = expires_in
+        self.expires_at = current_time + expires_in
+        
+        logger.info(f"成功获取新的访问令牌，有效期 {self.expires_in} 秒")
         return self.access_token
     
     def get_auth_header(self, use_bot_token=False):
@@ -54,7 +79,7 @@ class Auth:
             # 使用 OAuth 令牌格式
             token = self.get_access_token()
             return {
-                "Authorization": f"Bearer {token}",
+                "Authorization": f"QQBot {token}",
                 "Content-Type": "application/json"
             }
 

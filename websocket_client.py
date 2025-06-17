@@ -6,6 +6,7 @@ import logging
 import random
 from config import BOT_APPID, BOT_TOKEN
 from event_handler import event_handler
+from auth import auth_manager  # 保留auth_manager用于获取动态token
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -14,7 +15,7 @@ logger = logging.getLogger("websocket_client")
 class WebSocketClient:
     def __init__(self):
         self.gateway_url = "wss://api.sgroup.qq.com/websocket/"
-        self.token = f"Bot {BOT_APPID}.{BOT_TOKEN}"
+        # 不再使用静态token，改为在需要时从auth_manager获取
         self.heartbeat_interval = 45000  # 默认心跳间隔，将被服务器返回的值覆盖
         self.session_id = None
         self.last_sequence = None
@@ -77,21 +78,27 @@ class WebSocketClient:
     
     async def identify(self):
         """发送鉴权消息"""
-        identify_payload = {
-            "op": 2,
-            "d": {
-                "token": self.token,
-                "intents": 1 << 25 | 1 << 0 | 1 << 1 | 1 << 30,  # 添加所需的意图，包括群聊@消息
-                "shard": [0, 1],  # 单分片
-                "properties": {
-                    "$os": "windows",
-                    "$browser": "qqbot_python",
-                    "$device": "qqbot_python"
+        try:
+            # 获取最新的access_token
+            access_token = auth_manager.get_access_token()
+            # 使用新的QQBot格式的token
+            token = f"QQBot {access_token}"
+            logger.info("已获取动态token用于WS鉴权")
+            
+            identify_payload = {
+                "op": 2,
+                "d": {
+                    "token": token,
+                    "intents": 1 << 25 | 1 << 0 | 1 << 1 | 1 << 30,  # 添加所需的意图，包括群聊@消息
+                    "shard": [0, 1],  # 单分片
+                    "properties": {
+                        "$os": "windows",
+                        "$browser": "qqbot_python",
+                        "$device": "qqbot_python"
+                    }
                 }
             }
-        }
-        
-        try:
+            
             await asyncio.wait_for(
                 self.ws.send(json.dumps(identify_payload)),
                 timeout=10
@@ -224,6 +231,38 @@ class WebSocketClient:
         except Exception as e:
             logger.error(f"分发事件异常: {e}")
     
+    async def resume(self):
+        """恢复连接"""
+        try:
+            # 获取最新的access_token
+            access_token = auth_manager.get_access_token()
+            # 使用新的QQBot格式的token
+            token = f"QQBot {access_token}"
+            logger.info("已获取动态token用于WS恢复连接")
+            
+            resume_payload = {
+                "op": 6,
+                "d": {
+                    "token": token,
+                    "session_id": self.session_id,
+                    "seq": self.last_sequence
+                }
+            }
+            
+            await asyncio.wait_for(
+                self.ws.send(json.dumps(resume_payload)),
+                timeout=10
+            )
+            logger.info(f"已发送恢复连接消息，会话ID: {self.session_id}, 序列号: {self.last_sequence}")
+        except asyncio.TimeoutError:
+            logger.error("发送恢复连接消息超时")
+            self.connected = False
+            await self.reconnect()
+        except Exception as e:
+            logger.error(f"发送恢复连接消息失败: {e}")
+            self.connected = False
+            await self.reconnect()
+    
     async def reconnect(self):
         """重新连接WebSocket"""
         if self.reconnect_attempts >= self.max_reconnect_attempts:
@@ -258,32 +297,6 @@ class WebSocketClient:
             logger.error(f"重新连接失败: {e}")
             self.connected = False
             # 递归调用自身进行下一次重连
-            await self.reconnect()
-    
-    async def resume(self):
-        """恢复连接"""
-        resume_payload = {
-            "op": 6,
-            "d": {
-                "token": self.token,
-                "session_id": self.session_id,
-                "seq": self.last_sequence
-            }
-        }
-        
-        try:
-            await asyncio.wait_for(
-                self.ws.send(json.dumps(resume_payload)),
-                timeout=10
-            )
-            logger.info(f"已发送恢复连接消息，会话ID: {self.session_id}, 序列号: {self.last_sequence}")
-        except asyncio.TimeoutError:
-            logger.error("发送恢复连接消息超时")
-            self.connected = False
-            await self.reconnect()
-        except Exception as e:
-            logger.error(f"发送恢复连接消息失败: {e}")
-            self.connected = False
             await self.reconnect()
     
     async def close(self):
