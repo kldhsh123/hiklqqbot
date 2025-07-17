@@ -6,6 +6,7 @@ import logging
 import random
 from config import BOT_APPID, BOT_TOKEN
 from event_handler import event_handler
+from auth import auth_manager  # 保留auth_manager用于获取动态token
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -14,7 +15,7 @@ logger = logging.getLogger("websocket_client")
 class WebSocketClient:
     def __init__(self):
         self.gateway_url = "wss://api.sgroup.qq.com/websocket/"
-        self.token = f"Bot {BOT_APPID}.{BOT_TOKEN}"
+        # 不再使用静态token，改为在需要时从auth_manager获取
         self.heartbeat_interval = 45000  # 默认心跳间隔，将被服务器返回的值覆盖
         self.session_id = None
         self.last_sequence = None
@@ -28,6 +29,15 @@ class WebSocketClient:
     async def connect(self):
         """连接到WebSocket网关"""
         try:
+            # 如果已存在心跳任务，先取消
+            if self.heartbeat_task and not self.heartbeat_task.done():
+                self.heartbeat_task.cancel()
+                try:
+                    await self.heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+                self.heartbeat_task = None
+            
             # 设置连接超时
             self.ws = await asyncio.wait_for(
                 websockets.connect(
@@ -54,8 +64,16 @@ class WebSocketClient:
                     # 启动心跳任务
                     self.heartbeat_task = asyncio.create_task(self.heartbeat_loop())
                     
-                    # 发送鉴权消息
-                    await self.identify()
+                    # 判断是否有会话ID和序列号，如果有则尝试恢复会话，否则重新鉴权
+                    if self.session_id and self.last_sequence:
+                        try:
+                            await self.resume()
+                        except Exception as e:
+                            logger.error(f"恢复会话失败: {e}，尝试重新鉴权")
+                            await self.identify()
+                    else:
+                        # 发送鉴权消息
+                        await self.identify()
                     
                     # 开始监听消息
                     await self.listen_messages()
@@ -77,21 +95,27 @@ class WebSocketClient:
     
     async def identify(self):
         """发送鉴权消息"""
-        identify_payload = {
-            "op": 2,
-            "d": {
-                "token": self.token,
-                "intents": 1 << 25 | 1 << 0 | 1 << 1 | 1 << 30,  # 添加所需的意图，包括群聊@消息
-                "shard": [0, 1],  # 单分片
-                "properties": {
-                    "$os": "windows",
-                    "$browser": "qqbot_python",
-                    "$device": "qqbot_python"
+        try:
+            # 获取最新的access_token
+            access_token = auth_manager.get_access_token()
+            # 使用新的QQBot格式的token
+            token = f"QQBot {access_token}"
+            logger.info("已获取动态token用于WS鉴权")
+            
+            identify_payload = {
+                "op": 2,
+                "d": {
+                    "token": token,
+                    "intents": 1 << 25 | 1 << 0 | 1 << 1 | 1 << 30,  # 添加所需的意图，包括群聊@消息
+                    "shard": [0, 1],  # 单分片
+                    "properties": {
+                        "$os": "windows",
+                        "$browser": "qqbot_python",
+                        "$device": "qqbot_python"
+                    }
                 }
             }
-        }
-        
-        try:
+            
             await asyncio.wait_for(
                 self.ws.send(json.dumps(identify_payload)),
                 timeout=10
@@ -187,6 +211,10 @@ class WebSocketClient:
             if op_code == 0:  # Dispatch
                 # 为每个事件设置独立的超时保护
                 await asyncio.wait_for(self.handle_dispatch(data), timeout=20)
+            elif op_code == 7:  # Reconnect required
+                logger.info("收到服务器重连请求，准备重新连接")
+                self.connected = False
+                await self.reconnect()
             elif op_code == 11:  # Heartbeat ACK
                 logger.debug("收到心跳确认")
             else:
@@ -200,14 +228,14 @@ class WebSocketClient:
         """处理分发事件"""
         try:
             event_type = data.get("t", None)
-        event_data = data.get("d", {})
-        
+            event_data = data.get("d", {})
+            
             if event_type:
-        logger.info(f"收到事件: {event_type}")
-        
+                logger.info(f"收到事件: {event_type}")
+                
                 # 处理会话ID (用于断线重连)
-        if event_type == "READY":
-            self.session_id = event_data.get("session_id")
+                if event_type == "READY":
+                    self.session_id = event_data.get("session_id")
                     logger.info(f"已准备就绪，会话ID: {self.session_id}")
                 
                 # 使用事件处理器处理所有类型的事件
@@ -219,10 +247,83 @@ class WebSocketClient:
                     await event_handler.handle_event(event_type, event_data)
                 except Exception as e:
                     logger.error(f"事件处理失败 ({event_type}): {e}")
-        else:
+            else:
                 logger.warning(f"收到没有事件类型的消息: {data}")
-            except Exception as e:
+        except Exception as e:
             logger.error(f"分发事件异常: {e}")
+    
+    async def resume(self):
+        """恢复连接"""
+        try:
+            # 获取最新的access_token
+            access_token = auth_manager.get_access_token()
+            # 使用新的QQBot格式的token
+            token = f"QQBot {access_token}"
+            logger.info("已获取动态token用于WS恢复连接")
+            
+            # 确保session_id和last_sequence有效
+            if not self.session_id or self.last_sequence is None:
+                logger.error("恢复连接失败：没有有效的会话ID或序列号")
+                # 回退到重新鉴权
+                await self.identify()
+                return
+            
+            resume_payload = {
+                "op": 6,
+                "d": {
+                    "token": token,
+                    "session_id": self.session_id,
+                    "seq": self.last_sequence
+                }
+            }
+            
+            logger.info(f"正在尝试恢复连接，会话ID: {self.session_id}, 序列号: {self.last_sequence}")
+            await asyncio.wait_for(
+                self.ws.send(json.dumps(resume_payload)),
+                timeout=10
+            )
+            logger.info(f"已发送恢复连接消息")
+            
+            # 等待服务器确认恢复
+            try:
+                # 最多等待10秒看是否收到RESUMED事件
+                response_start_time = time.time()
+                while time.time() - response_start_time < 10:
+                    message = await asyncio.wait_for(self.ws.recv(), timeout=5)
+                    data = json.loads(message)
+                    
+                    # 如果收到RESUMED事件，表示恢复成功
+                    if data.get("op") == 0 and data.get("t") == "RESUMED":
+                        logger.info("会话恢复成功")
+                        return
+                    
+                    # 如果收到错误事件（比如4006无效会话），需要重新鉴权
+                    if data.get("op") == 9:
+                        logger.warn(f"会话恢复被拒绝: {data}")
+                        await self.identify()
+                        return
+                    
+                    # 处理其他消息
+                    await self.process_message(message)
+                
+                # 超时未收到RESUMED，但也没收到错误，假设连接保持
+                logger.info("未收到会话恢复确认，但连接保持中")
+                
+            except asyncio.TimeoutError:
+                logger.warn("等待会话恢复确认超时，尝试重新鉴权")
+                await self.identify()
+            except Exception as e:
+                logger.error(f"恢复会话过程中发生错误: {e}")
+                await self.identify()
+            
+        except asyncio.TimeoutError:
+            logger.error("发送恢复连接消息超时")
+            self.connected = False
+            await self.reconnect()
+        except Exception as e:
+            logger.error(f"发送恢复连接消息失败: {e}")
+            self.connected = False
+            await self.reconnect()
     
     async def reconnect(self):
         """重新连接WebSocket"""
@@ -238,6 +339,7 @@ class WebSocketClient:
         logger.info(f"准备重新连接，第 {self.reconnect_attempts} 次尝试，等待 {retry_interval:.2f} 秒...")
         
         try:
+            # 取消心跳任务
             if self.heartbeat_task and not self.heartbeat_task.done():
                 self.heartbeat_task.cancel()
                 try:
@@ -245,45 +347,34 @@ class WebSocketClient:
                 except asyncio.CancelledError:
                     pass
             
-            if self.ws and self.ws.open:
-                await self.ws.close()
+            # 安全关闭WebSocket连接
+            if self.ws:
+                try:
+                    # 使用try-except安全地关闭连接，不依赖于.open属性检查
+                    await asyncio.wait_for(self.ws.close(), timeout=5)
+                except Exception as e:
+                    logger.debug(f"关闭WebSocket时发生异常: {e}")
+            
+            # 确保ws对象被清除
+            self.ws = None
+            self.connected = False
             
             # 等待一段时间再重连
             await asyncio.sleep(retry_interval)
             
-            # 如果有会话ID和序列号，尝试恢复连接，否则重新建立连接
+            # 重新建立连接
             await self.connect()
+            
+            # 注意：connect()成功后会自动调用identify()重新鉴权
             
         except Exception as e:
             logger.error(f"重新连接失败: {e}")
             self.connected = False
+            
+            # 增加额外延迟以避免快速失败的循环
+            await asyncio.sleep(1)
+            
             # 递归调用自身进行下一次重连
-            await self.reconnect()
-    
-    async def resume(self):
-        """恢复连接"""
-        resume_payload = {
-            "op": 6,
-            "d": {
-                "token": self.token,
-                "session_id": self.session_id,
-                "seq": self.last_sequence
-            }
-        }
-        
-        try:
-            await asyncio.wait_for(
-                self.ws.send(json.dumps(resume_payload)),
-                timeout=10
-            )
-            logger.info(f"已发送恢复连接消息，会话ID: {self.session_id}, 序列号: {self.last_sequence}")
-        except asyncio.TimeoutError:
-            logger.error("发送恢复连接消息超时")
-            self.connected = False
-            await self.reconnect()
-        except Exception as e:
-            logger.error(f"发送恢复连接消息失败: {e}")
-            self.connected = False
             await self.reconnect()
     
     async def close(self):

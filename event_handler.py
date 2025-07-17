@@ -9,6 +9,10 @@ from auth_manager import auth_manager
 import traceback
 from typing import Optional, Dict, Any
 from stats_manager import stats_manager
+from enhanced_message_types import (
+    EventType, EnhancedMessage, EventDataNormalizer,
+    extract_user_id, extract_target_info, normalize_event
+)
 
 # 配置日志
 logger = logging.getLogger("event_handler")
@@ -35,18 +39,37 @@ class EventHandler:
             "GROUP_AT_MESSAGE_CREATE": self.handle_group_at_message,
             "READY": self.handle_ready,
             "RESUMED": self.handle_resumed,
-            
+
             # 群组事件 - 新添加功能
             "GROUP_ADD_ROBOT": self.handle_group_add_robot,
             "GROUP_DEL_ROBOT": self.handle_group_del_robot,
             "GROUP_MSG_REJECT": self.handle_group_msg_reject,
             "GROUP_MSG_RECEIVE": self.handle_group_msg_receive,
-            
+
             # 用户事件 - 新添加功能
             "FRIEND_ADD": self.handle_friend_add,
             "FRIEND_DEL": self.handle_friend_del,
             "C2C_MSG_REJECT": self.handle_c2c_msg_reject,
-            "C2C_MSG_RECEIVE": self.handle_c2c_msg_receive
+            "C2C_MSG_RECEIVE": self.handle_c2c_msg_receive,
+
+            # Botpy扩展事件支持
+            "MESSAGE_CREATE": self.handle_message_create,
+            "MESSAGE_DELETE": self.handle_message_delete,
+            "GUILD_CREATE": self.handle_guild_create,
+            "GUILD_UPDATE": self.handle_guild_update,
+            "GUILD_DELETE": self.handle_guild_delete,
+            "GUILD_MEMBER_ADD": self.handle_guild_member_add,
+            "GUILD_MEMBER_UPDATE": self.handle_guild_member_update,
+            "GUILD_MEMBER_REMOVE": self.handle_guild_member_remove,
+            "MESSAGE_REACTION_ADD": self.handle_message_reaction_add,
+            "MESSAGE_REACTION_REMOVE": self.handle_message_reaction_remove,
+            "INTERACTION_CREATE": self.handle_interaction_create,
+            "MESSAGE_AUDIT_PASS": self.handle_message_audit_pass,
+            "MESSAGE_AUDIT_REJECT": self.handle_message_audit_reject,
+            "AUDIO_START": self.handle_audio_start,
+            "AUDIO_FINISH": self.handle_audio_finish,
+            "AUDIO_ON_MIC": self.handle_audio_on_mic,
+            "AUDIO_OFF_MIC": self.handle_audio_off_mic
         }
         
         # AI聊天插件实例（仅当功能启用时）
@@ -119,8 +142,10 @@ class EventHandler:
             return data["group_openid"], True
         if "channel_id" in data:
              return data["channel_id"], False
+
+        # 处理私聊消息 - 优先使用user_openid
         author = data.get("author", {})
-        user_openid = author.get("id") or author.get("openid")
+        user_openid = author.get("user_openid") or author.get("id") or author.get("openid")
         if user_openid:
             return user_openid, False
         return None, False
@@ -145,28 +170,8 @@ class EventHandler:
                     self.logger.error(f"无法确定回复目标，事件数据: {event_data}")
                     return
 
-                self.logger.info(f"准备回复消息: target_id={target_id}, message_id={message_id}, is_group={is_group}, response='{response[:50]}...'")
-
-                if message_id:
-                    if is_group:
-                        await asyncio.to_thread(MessageSender.reply_group_message, target_id, message_id, "text", response)
-                    else:
-                        event_type = event_data.get("type")
-                        if event_type == "DIRECT_MESSAGE_CREATE" or event_type == "C2C_MESSAGE_CREATE":
-                             await asyncio.to_thread(MessageSender.reply_private_message, target_id, message_id, response)
-                        else:
-                             await asyncio.to_thread(MessageSender.reply_message, target_id, message_id, "text", response, is_group=False)
-                else:
-                    if is_group:
-                        await asyncio.to_thread(MessageSender.send_group_message, target_id, "text", response)
-                    else:
-                        event_type = event_data.get("type")
-                        if event_type == "DIRECT_MESSAGE_CREATE" or event_type == "C2C_MESSAGE_CREATE":
-                            await asyncio.to_thread(MessageSender.send_private_message, target_id, response)
-                        else:
-                            await asyncio.to_thread(MessageSender.send_message, target_id, "text", response, is_group=False)
-
-                self.logger.info(f"已发送回复到 {target_id}")
+                event_type = event_data.get("type")
+                await self._send_reply(target_id, message_id, is_group, event_type, response)
 
             except Exception as e:
                 self.logger.error(f"发送回复时出错: {e}")
@@ -195,29 +200,8 @@ class EventHandler:
                     self.logger.error(f"无法确定AI回复目标，事件数据: {event_data}")
                     return
 
-                self.logger.info(f"准备发送AI回复: target_id={target_id}, message_id={message_id}, is_group={is_group}, response='{response[:50]}...'")
-
-                if message_id:
-                    if is_group:
-                         await asyncio.to_thread(MessageSender.reply_group_message, target_id, message_id, "text", response)
-                    else:
-                         event_type = event_data.get("type")
-                         if event_type == "DIRECT_MESSAGE_CREATE" or event_type == "C2C_MESSAGE_CREATE":
-                              await asyncio.to_thread(MessageSender.reply_private_message, target_id, message_id, response)
-                         else:
-                              await asyncio.to_thread(MessageSender.reply_message, target_id, message_id, "text", response, is_group=False)
-                else:
-                    self.logger.warning(f"AI回复时未找到原始消息ID，将直接发送。事件: {event_data}")
-                    if is_group:
-                        await asyncio.to_thread(MessageSender.send_group_message, target_id, "text", response)
-                    else:
-                        event_type = event_data.get("type")
-                        if event_type == "DIRECT_MESSAGE_CREATE" or event_type == "C2C_MESSAGE_CREATE":
-                             await asyncio.to_thread(MessageSender.send_private_message, target_id, response)
-                        else:
-                             await asyncio.to_thread(MessageSender.send_message, target_id, "text", response, is_group=False)
-
-                self.logger.info(f"已发送AI回复到 {target_id}")
+                event_type = event_data.get("type")
+                await self._send_reply(target_id, message_id, is_group, event_type, response)
 
             except Exception as e:
                 self.logger.error(f"发送AI回复时出错: {e}")
@@ -440,19 +424,34 @@ class EventHandler:
         return False
         # --- 修改结束 ---
 
+    def _is_private_message(self, event_type: Optional[str], target_id: str) -> bool:
+        """判断是否为私聊消息"""
+        # 明确的私聊事件类型
+        if event_type in ["DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE"]:
+            return True
+
+        # 如果target_id看起来像用户openid（通常是长字符串），且不是频道ID格式
+        if target_id and len(target_id) > 20 and not target_id.startswith("channel_"):
+            return True
+
+        return False
+
     async def _send_reply(self, target_id: str, message_id: Optional[str], is_group: bool, event_type: Optional[str], response: str):
         """统一的发送回复逻辑"""
         if not response or not target_id:
              self.logger.warning(f"无法发送回复: response='{response}', target_id='{target_id}'")
              return
 
-        self.logger.info(f"准备发送回复: target_id={target_id}, message_id={message_id}, is_group={is_group}, event_type={event_type}, response='{response[:50]}...'")
+        # 判断是否为私聊消息
+        is_private = self._is_private_message(event_type, target_id)
+
+        self.logger.info(f"准备发送回复: target_id={target_id}, message_id={message_id}, is_group={is_group}, is_private={is_private}, event_type={event_type}, response='{response[:50]}...'")
 
         try:
             if message_id: # 优先尝试回复原始消息
                 if is_group:
                      await asyncio.to_thread(MessageSender.reply_group_message, target_id, message_id, "text", response)
-                elif event_type == "DIRECT_MESSAGE_CREATE" or event_type == "C2C_MESSAGE_CREATE":
+                elif is_private:
                      await asyncio.to_thread(MessageSender.reply_private_message, target_id, message_id, response)
                 else: # 处理频道内@消息等其他非群组、非私聊类型
                      await asyncio.to_thread(MessageSender.reply_message, target_id, message_id, "text", response, is_group=False)
@@ -460,7 +459,7 @@ class EventHandler:
                 self.logger.warning(f"发送回复时未找到原始消息ID，将直接发送。Target: {target_id}, Event Type: {event_type}")
                 if is_group:
                      await asyncio.to_thread(MessageSender.send_group_message, target_id, "text", response)
-                elif event_type == "DIRECT_MESSAGE_CREATE" or event_type == "C2C_MESSAGE_CREATE":
+                elif is_private:
                      await asyncio.to_thread(MessageSender.send_private_message, target_id, response)
                 else: # 处理频道内@消息等其他非群组、非私聊类型
                      await asyncio.to_thread(MessageSender.send_message, target_id, "text", response, is_group=False)
@@ -575,18 +574,105 @@ class EventHandler:
     async def handle_c2c_msg_receive(self, event_data: Dict[str, Any]) -> bool:
         """处理接受机器人主动消息事件"""
         self.logger.info(f"用户接受机器人主动消息: {event_data}")
-        
+
         user_openid = event_data.get("openid")
         if not user_openid:
             self.logger.error("缺少用户ID")
             return False
-        
+
         user = stats_manager.get_user(user_openid)
         if user:
             user["can_send_proactive_msg"] = True
             stats_manager._save_data()
             return True
         return False
+
+    # Botpy扩展事件处理方法
+    async def handle_message_create(self, event_data: Dict[str, Any]) -> bool:
+        """处理消息创建事件（私域机器人）"""
+        self.logger.info(f"收到消息创建事件: {event_data}")
+        # 转换为AT_MESSAGE_CREATE事件处理
+        return await self.handle_at_message(event_data)
+
+    async def handle_message_delete(self, event_data: Dict[str, Any]) -> bool:
+        """处理消息删除事件"""
+        self.logger.info(f"消息被删除: {event_data}")
+        return True
+
+    async def handle_guild_create(self, event_data: Dict[str, Any]) -> bool:
+        """处理频道创建事件"""
+        self.logger.info(f"机器人加入频道: {event_data}")
+        return True
+
+    async def handle_guild_update(self, event_data: Dict[str, Any]) -> bool:
+        """处理频道更新事件"""
+        self.logger.info(f"频道信息更新: {event_data}")
+        return True
+
+    async def handle_guild_delete(self, event_data: Dict[str, Any]) -> bool:
+        """处理频道删除事件"""
+        self.logger.info(f"机器人退出频道: {event_data}")
+        return True
+
+    async def handle_guild_member_add(self, event_data: Dict[str, Any]) -> bool:
+        """处理频道成员加入事件"""
+        self.logger.info(f"频道成员加入: {event_data}")
+        return True
+
+    async def handle_guild_member_update(self, event_data: Dict[str, Any]) -> bool:
+        """处理频道成员更新事件"""
+        self.logger.info(f"频道成员信息更新: {event_data}")
+        return True
+
+    async def handle_guild_member_remove(self, event_data: Dict[str, Any]) -> bool:
+        """处理频道成员移除事件"""
+        self.logger.info(f"频道成员移除: {event_data}")
+        return True
+
+    async def handle_message_reaction_add(self, event_data: Dict[str, Any]) -> bool:
+        """处理消息表情添加事件"""
+        self.logger.info(f"消息表情添加: {event_data}")
+        return True
+
+    async def handle_message_reaction_remove(self, event_data: Dict[str, Any]) -> bool:
+        """处理消息表情移除事件"""
+        self.logger.info(f"消息表情移除: {event_data}")
+        return True
+
+    async def handle_interaction_create(self, event_data: Dict[str, Any]) -> bool:
+        """处理交互事件"""
+        self.logger.info(f"收到交互事件: {event_data}")
+        return True
+
+    async def handle_message_audit_pass(self, event_data: Dict[str, Any]) -> bool:
+        """处理消息审核通过事件"""
+        self.logger.info(f"消息审核通过: {event_data}")
+        return True
+
+    async def handle_message_audit_reject(self, event_data: Dict[str, Any]) -> bool:
+        """处理消息审核拒绝事件"""
+        self.logger.info(f"消息审核拒绝: {event_data}")
+        return True
+
+    async def handle_audio_start(self, event_data: Dict[str, Any]) -> bool:
+        """处理音频开始事件"""
+        self.logger.info(f"音频开始播放: {event_data}")
+        return True
+
+    async def handle_audio_finish(self, event_data: Dict[str, Any]) -> bool:
+        """处理音频结束事件"""
+        self.logger.info(f"音频播放结束: {event_data}")
+        return True
+
+    async def handle_audio_on_mic(self, event_data: Dict[str, Any]) -> bool:
+        """处理上麦事件"""
+        self.logger.info(f"用户上麦: {event_data}")
+        return True
+
+    async def handle_audio_off_mic(self, event_data: Dict[str, Any]) -> bool:
+        """处理下麦事件"""
+        self.logger.info(f"用户下麦: {event_data}")
+        return True
 
 # 创建全局实例
 event_handler = EventHandler()

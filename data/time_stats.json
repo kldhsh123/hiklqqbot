@@ -1,0 +1,38 @@
+{
+  "daily": {
+    "2025-07-17": {
+      "commands": {
+        "help": 1
+      },
+      "groups": {},
+      "users": {
+        "B14A9263A8B69F904BCBC2234626FB7F": 1
+      },
+      "total": 1
+    }
+  },
+  "weekly": {
+    "2025-W28": {
+      "commands": {
+        "help": 1
+      },
+      "groups": {},
+      "users": {
+        "B14A9263A8B69F904BCBC2234626FB7F": 1
+      },
+      "total": 1
+    }
+  },
+  "monthly": {
+    "2025-07": {
+      "commands": {
+        "help": 1
+      },
+      "groups": {},
+      "users": {
+        "B14A9263A8B69F904BCBC2234626FB7F": 1
+      },
+      "total": 1
+    }
+  }
+}

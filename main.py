@@ -2,7 +2,7 @@ import os
 import asyncio
 import logging
 import logging.config
-from config import BOT_APPID, BOT_APPSECRET, BOT_TOKEN, COMM_MODE
+from config import BOT_APPID, BOT_APPSECRET, BOT_TOKEN, COMM_MODE, USE_BOTPY_CLIENT
 from websocket_client import ws_client
 from webhook_server import webhook_server
 from plugins.plugin_manager import plugin_manager
@@ -14,6 +14,16 @@ from plugins.hiklqqbot_maintenance_plugin import HiklqqbotMaintenancePlugin
 from plugins.hiklqqbot_userid_plugin import HiklqqbotUseridPlugin
 from plugins.hiklqqbot_reload_plugin import HiklqqbotReloadPlugin
 from plugins.hiklqqbot_stats_plugin import HiklqqbotStatsPlugin
+
+# 动态导入botpy集成模块
+try:
+    from botpy_integration import start_botpy_client, BOTPY_AVAILABLE
+    BOTPY_INTEGRATION_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Botpy集成不可用: {e}")
+    BOTPY_INTEGRATION_AVAILABLE = False
+    start_botpy_client = None
+    BOTPY_AVAILABLE = False
 
 # 确保彩色日志格式化器模块可用
 try:
@@ -110,6 +120,42 @@ async def start_webhook_server():
         # 确保关闭服务器
         await webhook_server.stop()
 
+async def start_botpy_websocket_client():
+    """启动Botpy WebSocket客户端"""
+    if not BOTPY_INTEGRATION_AVAILABLE:
+        raise ImportError("Botpy集成不可用")
+
+    if not BOTPY_AVAILABLE:
+        raise ImportError("Botpy SDK不可用")
+
+    logger.info("使用Botpy WebSocket模式启动QQ机器人...")
+    max_restart_attempts = 5
+    restart_attempts = 0
+    restart_delay = 10  # 初始重启延迟（秒）
+
+    while restart_attempts < max_restart_attempts:
+        try:
+            # 启动botpy客户端
+            logger.info("正在启动Botpy客户端...")
+            await start_botpy_client(event_handler)
+
+            # 如果正常结束，退出循环
+            break
+
+        except Exception as e:
+            restart_attempts += 1
+            logger.error(f"Botpy客户端运行失败 (尝试 {restart_attempts}/{max_restart_attempts}): {e}")
+
+            if restart_attempts < max_restart_attempts:
+                # 指数退避策略
+                restart_delay = min(restart_delay * 2, 300)  # 最大等待5分钟
+                logger.info(f"将在 {restart_delay} 秒后重新启动Botpy客户端...")
+                await asyncio.sleep(restart_delay)
+            else:
+                logger.critical("Botpy客户端达到最大重启次数，退出程序")
+
+    logger.info("Botpy客户端已停止")
+
 def init_stats_system():
     """初始化统计系统"""
     logger.info("正在初始化统计系统...")
@@ -147,11 +193,31 @@ async def main_async():
     
     logger.info(f"通信模式: {COMM_MODE}")
     logger.info(f"Bot AppID: {BOT_APPID}")
-    
-    if COMM_MODE.lower() == "webhook":
-        await start_webhook_server()
+    logger.info(f"使用Botpy客户端: {USE_BOTPY_CLIENT}")
+
+    # 检查botpy客户端配置
+    if USE_BOTPY_CLIENT:
+        if not BOTPY_INTEGRATION_AVAILABLE:
+            logger.error("Botpy集成不可用，但配置要求使用Botpy客户端")
+            logger.error("请检查botpy-master目录是否存在，或设置USE_BOTPY_CLIENT=false")
+            return
+        if not BOTPY_AVAILABLE:
+            logger.error("Botpy SDK不可用，但配置要求使用Botpy客户端")
+            logger.error("请检查botpy-master目录中的SDK是否完整")
+            return
+
+    # 根据配置选择客户端类型
+    if USE_BOTPY_CLIENT:
+        # 使用botpy客户端（目前只支持WebSocket模式）
+        if COMM_MODE.lower() == "webhook":
+            logger.warning("Botpy客户端暂不支持Webhook模式，将使用WebSocket模式")
+        await start_botpy_websocket_client()
     else:
-        await start_websocket_client()
+        # 使用原生客户端
+        if COMM_MODE.lower() == "webhook":
+            await start_webhook_server()
+        else:
+            await start_websocket_client()
 
 def main():
     """程序入口"""

@@ -2,6 +2,8 @@ import requests
 import logging
 from auth import auth_manager
 from config import API_SEND_MESSAGE_URL, API_BASE_URL
+from enhanced_message_types import MessageBuilder, MessageType
+from typing import Optional, Dict, Any, Union
 
 # 配置日志
 logger = logging.getLogger("message")
@@ -33,35 +35,62 @@ class MessageBuilder:
 
 class MessageSender:
     @staticmethod
+    def _prepare_message_data(message_content: Union[str, Dict[str, Any]], message_type: Union[str, int] = "text") -> Dict[str, Any]:
+        """准备消息数据，支持多种消息格式"""
+        if isinstance(message_content, dict):
+            # 如果是字典格式，可能包含完整的消息结构
+            if "msg_type" in message_content:
+                return message_content
+            elif "content" in message_content:
+                return {
+                    "content": message_content["content"],
+                    "msg_type": MessageType.TEXT.value if message_type == "text" else message_type,
+                    **{k: v for k, v in message_content.items() if k != "content"}
+                }
+
+        # 处理字符串内容
+        content_to_send = str(message_content)
+        msg_type = MessageType.TEXT.value if message_type == "text" else message_type
+
+        return {
+            "content": content_to_send,
+            "msg_type": msg_type
+        }
+
+    @staticmethod
     def send_message(channel_id, message_type, message_content, is_group=False):
         """发送消息到指定频道或群聊"""
         # 群聊消息使用 Bot 令牌，频道消息使用 OAuth 令牌
         headers = auth_manager.get_auth_header(use_bot_token=is_group)
-        
-        # 确保消息内容格式正确
-        if message_type == "text" and isinstance(message_content, str):
-            content_to_send = message_content
-        elif isinstance(message_content, dict) and "content" in message_content:
-            content_to_send = message_content["content"]
-        else:
-            content_to_send = str(message_content)
+
+        # 准备消息数据
+        message_data = MessageSender._prepare_message_data(message_content, message_type)
+        content_to_send = message_data.get("content", str(message_content))
             
         # 对于群聊消息，使用不同的API端点
         if is_group:
             api_url = f"{API_BASE_URL}/v2/groups/{channel_id}/messages"
             data = {
-                "msg_type": 0,  # 0表示文本消息
+                "msg_type": message_data.get("msg_type", 0),
                 "content": content_to_send
             }
+            # 添加其他消息字段支持
+            for key in ["markdown", "keyboard", "ark", "media", "image"]:
+                if key in message_data:
+                    data[key] = message_data[key]
             # 记录完整请求数据用于调试
             logger.info(f"群聊请求数据: {data}")
         else:
             api_url = API_SEND_MESSAGE_URL
             data = {
                 "channel_id": channel_id,
-                "msg_type": message_type,
+                "msg_type": message_data.get("msg_type", MessageType.TEXT.value if message_type == "text" else message_type),
                 "content": content_to_send
             }
+            # 添加其他消息字段支持
+            for key in ["markdown", "keyboard", "ark", "media", "image"]:
+                if key in message_data:
+                    data[key] = message_data[key]
         
         logger.info(f"发送消息到 {channel_id}, 类型: {message_type}, 是群聊: {is_group}")
         
@@ -259,4 +288,59 @@ class MessageSender:
             return response.json()
         except Exception as e:
             logger.error(f"回复私聊消息异常: {str(e)}")
-            raise 
+            raise
+
+    # 新增的增强消息发送方法
+    @staticmethod
+    def send_enhanced_message(target_id: str, message_data: Dict[str, Any], is_group: bool = False, is_private: bool = False):
+        """
+        发送增强消息，支持多种消息类型
+
+        Args:
+            target_id: 目标ID（频道ID、群组ID或用户ID）
+            message_data: 消息数据字典
+            is_group: 是否为群聊消息
+            is_private: 是否为私聊消息
+        """
+        if is_private:
+            return MessageSender.send_private_message(
+                target_id,
+                message_data.get("content", ""),
+                message_data.get("msg_type", 0),
+                message_data.get("markdown"),
+                message_data.get("keyboard"),
+                message_data.get("ark"),
+                message_data.get("media")
+            )
+        else:
+            return MessageSender.send_message(target_id, message_data.get("msg_type", "text"), message_data, is_group)
+
+    @staticmethod
+    def send_markdown_message(target_id: str, content: str, markdown: Dict[str, Any], is_group: bool = False, is_private: bool = False):
+        """发送Markdown消息"""
+        message_data = MessageBuilder.build_markdown_message(content, markdown)
+        return MessageSender.send_enhanced_message(target_id, message_data, is_group, is_private)
+
+    @staticmethod
+    def send_image_message(target_id: str, image_url: str, is_group: bool = False, is_private: bool = False):
+        """发送图片消息"""
+        message_data = MessageBuilder.build_image_message(image_url)
+        return MessageSender.send_enhanced_message(target_id, message_data, is_group, is_private)
+
+    @staticmethod
+    def send_keyboard_message(target_id: str, content: str, keyboard: Dict[str, Any], is_group: bool = False, is_private: bool = False):
+        """发送带按钮的消息"""
+        message_data = MessageBuilder.build_keyboard_message(content, keyboard)
+        return MessageSender.send_enhanced_message(target_id, message_data, is_group, is_private)
+
+    @staticmethod
+    def send_file_message(target_id: str, file_info: Dict[str, Any], is_group: bool = False, is_private: bool = False):
+        """发送文件消息"""
+        message_data = MessageBuilder.build_file_message(file_info)
+        return MessageSender.send_enhanced_message(target_id, message_data, is_group, is_private)
+
+    @staticmethod
+    def send_ark_message(target_id: str, ark: Dict[str, Any], is_group: bool = False, is_private: bool = False):
+        """发送ARK消息"""
+        message_data = MessageBuilder.build_ark_message(ark)
+        return MessageSender.send_enhanced_message(target_id, message_data, is_group, is_private)

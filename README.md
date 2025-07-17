@@ -13,6 +13,8 @@ qq交流群:330316577
 - 🔐 **权限系统**: 支持管理员权限控制和维护模式
 - 📝 **详细日志**: 完善的日志记录系统，便于调试和问题排查
 - ⚡ **异步处理**: 使用 Python 异步特性，提高性能和并发处理能力
+- 🤖 **Botpy集成**: 支持QQ官方botpy SDK，提供更完整的事件支持和私聊消息处理
+- 🔄 **渐进式升级**: 可选择使用原生客户端或botpy客户端，保持向后兼容
 
 ## 插件市场
 > 我们期待您天马行空的想法，您可以前往 [HiklQQBot官网](https://hiklbot.kldhsh.top/) 通过向AI描述您的想法来生成插件
@@ -75,6 +77,41 @@ pip install pynacl
 # 或者
 pip install ed25519
 ```
+
+3. 如果要使用 Botpy SDK 集成功能，需要安装额外依赖：
+
+```bash
+pip install PyYAML aiohttp APScheduler
+```
+
+### Botpy 集成配置
+
+HiklQQBot 支持集成 QQ 官方的 botpy SDK，提供更完整的事件支持和私聊消息处理。
+
+在 `.env` 文件中添加以下配置：
+
+```bash
+# 是否使用 Botpy 客户端（默认：false）
+USE_BOTPY_CLIENT=false
+
+# Botpy 意图配置（逗号分隔）
+BOTPY_INTENTS=public_messages,public_guild_messages,direct_message
+
+# Botpy 日志级别
+BOTPY_LOG_LEVEL=INFO
+
+# Botpy 超时设置（秒）
+BOTPY_TIMEOUT=5
+
+# 是否使用沙盒环境
+BOTPY_IS_SANDBOX=false
+```
+
+**Botpy 集成优势：**
+- 支持更多事件类型（频道成员变化、消息表情反应等）
+- 更好的私聊消息支持
+- 官方维护的稳定实现
+- 丰富的消息类型支持（Markdown、ARK、按钮等）
 
 ## 运行
 
