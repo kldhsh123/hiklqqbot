@@ -13,6 +13,8 @@ from enhanced_message_types import (
     EventType, EnhancedMessage, EventDataNormalizer,
     extract_user_id, extract_target_info, normalize_event
 )
+from blacklist_manager import blacklist_manager
+from config import ENABLE_BLACKLIST, BLACKLIST_SHOW_REASON
 
 # 配置日志
 logger = logging.getLogger("event_handler")
@@ -136,6 +138,72 @@ class EventHandler:
             user_id = data.get("openid")
         return user_id
 
+    def _format_expire_time(self, expire_time_str: str) -> str:
+        """格式化过期时间为更易读的格式"""
+        try:
+            from datetime import datetime
+            expire_time = datetime.fromisoformat(expire_time_str)
+            now = datetime.now()
+
+            # 计算剩余时间
+            remaining = expire_time - now
+            if remaining.total_seconds() <= 0:
+                return "已过期"
+
+            days = remaining.days
+            hours, remainder = divmod(remaining.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
+
+            if days > 0:
+                return f"{days}天{hours}小时后解封"
+            elif hours > 0:
+                return f"{hours}小时{minutes}分钟后解封"
+            else:
+                return f"{minutes}分钟后解封"
+        except:
+            return expire_time_str
+
+    def _check_blacklist(self, event_data: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+        """检查用户或群组是否在黑名单中，返回(是否被屏蔽, 封禁原因)"""
+        try:
+            # 检查是否启用黑名单功能
+            if not ENABLE_BLACKLIST:
+                return False, None
+
+            # 检查群组黑名单
+            group_id = event_data.get("group_openid")
+            if group_id:
+                group_entry = blacklist_manager.get_entry(group_id)
+                if group_entry and not group_entry.is_expired():
+                    reason = f"🚫 该群组已被封禁\n📝 封禁原因：{group_entry.reason}"
+                    if group_entry.expires_at:
+                        expire_info = self._format_expire_time(group_entry.expires_at)
+                        reason += f"\n⏰ {expire_info}"
+                    else:
+                        reason += f"\n⏰ 永久封禁"
+                    self.logger.warning(f"群组 {group_id} 在黑名单中，拒绝处理 - {group_entry.reason}")
+                    return True, reason
+
+            # 检查用户黑名单
+            user_id = self._get_user_id(event_data)
+            if user_id:
+                user_entry = blacklist_manager.get_entry(user_id)
+                if user_entry and not user_entry.is_expired():
+                    reason = f"🚫 您已被封禁，无法使用机器人\n📝 封禁原因：{user_entry.reason}"
+                    if user_entry.expires_at:
+                        expire_info = self._format_expire_time(user_entry.expires_at)
+                        reason += f"\n⏰ {expire_info}"
+                    else:
+                        reason += f"\n⏰ 永久封禁"
+                    self.logger.warning(f"用户 {user_id} 在黑名单中，拒绝处理 - {user_entry.reason}")
+                    return True, reason
+
+            return False, None
+
+        except Exception as e:
+            self.logger.error(f"检查黑名单时出错: {e}")
+            return False, None
+
     def _get_channel_id(self, data):
         """从事件数据中提取频道/群组/用户ID，用于回复"""
         if "group_openid" in data:
@@ -210,6 +278,8 @@ class EventHandler:
     async def handle_at_message(self, data):
         """处理频道@消息"""
         self.logger.info(f"收到@消息: {data}")
+        # 设置事件类型，确保黑名单检查能正确识别
+        data["type"] = "AT_MESSAGE_CREATE"
         content = data.get("content", "")
         user_id = self._get_user_id(data)
 
@@ -231,6 +301,8 @@ class EventHandler:
     async def handle_direct_message(self, data):
         """处理私聊消息 (包括C2C)"""
         self.logger.info(f"收到私聊/C2C消息: {data}")
+        # 设置事件类型，确保黑名单检查能正确识别
+        data["type"] = "DIRECT_MESSAGE_CREATE"
         content = data.get("content", "")
         user_id = self._get_user_id(data)
 
@@ -244,12 +316,16 @@ class EventHandler:
     async def handle_c2c_message(self, data):
         """处理单聊(C2C)消息 - 实际上会被 handle_direct_message 接管"""
         self.logger.info(f"收到C2C消息 (将被转发给私聊处理): {data}")
+        # 设置事件类型，确保黑名单检查能正确识别
+        data["type"] = "C2C_MESSAGE_CREATE"
         await self.handle_direct_message(data)
         return True
 
     async def handle_group_at_message(self, data):
         """处理群聊@消息"""
         self.logger.info(f"收到群聊@消息: {data}")
+        # 设置事件类型，确保黑名单检查能正确识别
+        data["type"] = "GROUP_AT_MESSAGE_CREATE"
         content = data.get("content", "")
         user_id = self._get_user_id(data)
         group_openid = data.get("group_openid")
@@ -290,6 +366,41 @@ class EventHandler:
 
     async def _process_command(self, content, data, user_id=None):
         """处理命令，找到插件或特殊命令（如/help）则创建后台任务执行"""
+        # 检查黑名单
+        is_blocked, block_reason = self._check_blacklist(data)
+        if is_blocked:
+            self.logger.info(f"黑名单检查: 被阻止, 原因='{block_reason}', SHOW_REASON={BLACKLIST_SHOW_REASON}")
+
+            # 可选择性地向用户发送封禁原因（仅在私聊或@消息时）
+            event_type = data.get("type")
+            self.logger.info(f"事件类型: {event_type}")
+
+            if event_type in ["DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE", "AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"]:
+                self.logger.info(f"事件类型匹配，检查发送条件: block_reason={bool(block_reason)}, BLACKLIST_SHOW_REASON={BLACKLIST_SHOW_REASON}")
+
+                if block_reason and BLACKLIST_SHOW_REASON:
+                    try:
+                        message_id = data.get("id")
+                        target_id, is_group = self._get_channel_id(data)
+                        self.logger.info(f"获取目标ID: target_id='{target_id}', is_group={is_group}, message_id='{message_id}'")
+
+                        if target_id:
+                            # 等待发送完成
+                            await self._send_reply(target_id, message_id, is_group, event_type, f"❌ {block_reason}")
+                            self.logger.info(f"已发送封禁原因给 {target_id}")
+                        else:
+                            self.logger.warning("无法获取有效的target_id，跳过发送封禁原因")
+                    except Exception as e:
+                        self.logger.error(f"发送封禁原因时出错: {e}")
+                        import traceback
+                        self.logger.error(traceback.format_exc())
+                else:
+                    self.logger.info(f"跳过发送封禁原因: block_reason={bool(block_reason)}, BLACKLIST_SHOW_REASON={BLACKLIST_SHOW_REASON}")
+            else:
+                self.logger.info(f"事件类型不匹配，不发送封禁原因: {event_type}")
+
+            return False  # 被黑名单阻止，不处理
+
         clean_content = re.sub(r'<@!\d+>', '', content).strip()
         event_type = data.get("type")
         is_at_message = event_type in ["AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"]

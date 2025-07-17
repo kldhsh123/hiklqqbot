@@ -14,6 +14,7 @@ from plugins.hiklqqbot_maintenance_plugin import HiklqqbotMaintenancePlugin
 from plugins.hiklqqbot_userid_plugin import HiklqqbotUseridPlugin
 from plugins.hiklqqbot_reload_plugin import HiklqqbotReloadPlugin
 from plugins.hiklqqbot_stats_plugin import HiklqqbotStatsPlugin
+from plugins.hiklqqbot_blacklist_plugin import HiklqqbotBlacklistPlugin
 
 # 动态导入botpy集成模块
 try:
@@ -172,6 +173,7 @@ def register_builtin_plugins():
     plugin_manager.register_plugin(HiklqqbotUseridPlugin())
     plugin_manager.register_plugin(HiklqqbotReloadPlugin())
     plugin_manager.register_plugin(HiklqqbotStatsPlugin())  # 注册统计插件
+    plugin_manager.register_plugin(HiklqqbotBlacklistPlugin())  # 注册黑名单插件
 
 async def main_async():
     """异步主程序"""

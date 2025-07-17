@@ -18,7 +18,7 @@ class Auth:
         if self.access_token and current_time < self.expires_at - 60:
             return self.access_token
         
-        # 请求新的访问令牌
+        # 请求新的访问令牌 - 使用官方文档中的正确字段名
         data = {
             "appId": BOT_APPID,
             "clientSecret": BOT_APPSECRET

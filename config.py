@@ -24,7 +24,7 @@ SERVER_PORT = int(os.getenv("BOT_SERVER_PORT", 8080))
 
 # API 端点
 API_BASE_URL = "https://api.sgroup.qq.com"
-API_AUTH_URL = f"{API_BASE_URL}/auth/token"
+API_AUTH_URL = "https://bots.qq.com/app/getAppAccessToken"  # 正确的OAuth认证端点
 API_SEND_MESSAGE_URL = f"{API_BASE_URL}/v2/messages"
 
 # Botpy集成配置
@@ -33,3 +33,12 @@ BOTPY_INTENTS = os.getenv("BOTPY_INTENTS", "public_messages,public_guild_message
 BOTPY_LOG_LEVEL = os.getenv("BOTPY_LOG_LEVEL", "INFO")
 BOTPY_TIMEOUT = int(os.getenv("BOTPY_TIMEOUT", "5"))
 BOTPY_IS_SANDBOX = os.getenv("BOTPY_IS_SANDBOX", "false").lower() == "true"
+
+# 统计系统配置
+STATS_MAX_MONTHS = int(os.getenv("STATS_MAX_MONTHS", "12"))
+
+# 黑名单功能配置
+ENABLE_BLACKLIST = os.getenv("ENABLE_BLACKLIST", "true").lower() == "true"
+BLACKLIST_AUTO_SAVE = os.getenv("BLACKLIST_AUTO_SAVE", "true").lower() == "true"
+BLACKLIST_LOG_BLOCKED = os.getenv("BLACKLIST_LOG_BLOCKED", "true").lower() == "true"
+BLACKLIST_SHOW_REASON = os.getenv("BLACKLIST_SHOW_REASON", "true").lower() == "true"
