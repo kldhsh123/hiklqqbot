@@ -24,5 +24,8 @@ SERVER_PORT = int(os.getenv("BOT_SERVER_PORT", 8080))
 
 # API 端点
 API_BASE_URL = "https://api.sgroup.qq.com"
-API_AUTH_URL = f"{API_BASE_URL}/auth/token"
+API_AUTH_URL = "https://bots.qq.com/app/getAppAccessToken"  # 更新为腾讯最新文档中提供的认证URL
 API_SEND_MESSAGE_URL = f"{API_BASE_URL}/v2/messages" 
+
+# 统计配置
+STATS_MAX_MONTHS = int(os.getenv("STATS_MAX_MONTHS", 12)) # 最大保留的月统计数据数量 

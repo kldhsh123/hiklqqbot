@@ -6,6 +6,7 @@ import random
 import string
 from typing import Dict, List, Set, Optional, Tuple
 from datetime import datetime
+from config import STATS_MAX_MONTHS
 
 class StatsManager:
     """
@@ -59,6 +60,10 @@ class StatsManager:
         
         # 加载数据
         self._load_data()
+        
+        # 初始化后清理过期的时间统计数据
+        self.cleanup_time_stats()
+        
         self.initialized = True
         
     def _load_data(self):
@@ -87,6 +92,26 @@ class StatsManager:
                     self.time_stats = json.load(f)
         except Exception as e:
             self.logger.error(f"加载统计数据失败: {e}")
+    
+    def cleanup_time_stats(self):
+        """清理过期的时间统计数据，只保留最近STATS_MAX_MONTHS个月的数据"""
+        try:
+            if not self.time_stats["monthly"]:
+                return  # 如果没有月统计数据，直接返回
+                
+            # 获取所有月份并按时间排序（格式为YYYY-MM）
+            all_months = sorted(list(self.time_stats["monthly"].keys()))
+            
+            # 如果月统计数据超过最大保留数量，则删除最早的数据
+            if len(all_months) > STATS_MAX_MONTHS:
+                months_to_remove = all_months[:-STATS_MAX_MONTHS]
+                for month in months_to_remove:
+                    del self.time_stats["monthly"][month]
+                self.logger.info(f"已清理过期月统计数据：{months_to_remove}")
+                # 保存更新后的数据
+                self._save_data()
+        except Exception as e:
+            self.logger.error(f"清理时间统计数据失败: {e}")
     
     def _save_data(self):
         """保存数据到文件"""
@@ -412,6 +437,11 @@ class StatsManager:
             monthly_stats["groups"][group_openid] += 1
         
         monthly_stats["total"] += 1
+        
+        # 检查并清理过期的月统计数据
+        # 当添加新的月份数据时，触发清理
+        if monthly_key not in self.time_stats["monthly"] or len(self.time_stats["monthly"]) > STATS_MAX_MONTHS:
+            self.cleanup_time_stats()
         
         self._save_data()
     
