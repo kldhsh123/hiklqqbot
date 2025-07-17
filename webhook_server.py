@@ -7,7 +7,7 @@ import base64
 import asyncio
 from aiohttp import web
 import binascii
-from config import BOT_TOKEN, WEBHOOK_HOST, WEBHOOK_PORT, WEBHOOK_PATH
+from config import BOT_APPSECRET, WEBHOOK_HOST, WEBHOOK_PORT, WEBHOOK_PATH
 from event_handler import event_handler
 
 # 配置日志
@@ -111,9 +111,9 @@ class WebhookServer:
             
             logger.info(f"验证请求: token={plain_token}, ts={event_ts}")
             
-            # 生成签名
+            # 生成签名 - 关键修复：使用 BOT_APPSECRET 而不是 BOT_TOKEN
             message = event_ts + plain_token
-            signature_hex = generate_signature(BOT_TOKEN, message)
+            signature_hex = generate_signature(BOT_APPSECRET, message)
             
             # 返回验证响应
             response_data = {
@@ -127,4 +127,4 @@ class WebhookServer:
             logger.error(f"处理验证请求异常: {e}")
             return web.Response(text="error", status=500)
 
-webhook_server = WebhookServer() 
+webhook_server = WebhookServer()
