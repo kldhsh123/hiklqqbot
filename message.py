@@ -2,8 +2,8 @@ import requests
 import logging
 from auth import auth_manager
 from config import API_SEND_MESSAGE_URL, API_BASE_URL
-from enhanced_message_types import MessageBuilder, MessageType
-from typing import Optional, Dict, Any, Union
+from enhanced_message_types import MessageType
+from typing import Dict, Any, Union
 
 # 配置日志
 logger = logging.getLogger("message")
@@ -15,14 +15,14 @@ class MessageBuilder:
         return {
             "content": content
         }
-    
+
     @staticmethod
     def build_image_message(url):
         """构建图片消息"""
         return {
             "image": url
         }
-    
+
     @staticmethod
     def build_keyboard_message(content, buttons):
         """构建带按钮的消息"""
@@ -31,6 +31,77 @@ class MessageBuilder:
             "keyboard": {
                 "buttons": buttons
             }
+        }
+
+    @staticmethod
+    def build_media_message(media_info, content=""):
+        """
+        构建富媒体消息
+
+        Args:
+            media_info: 富媒体信息，包含file_info等字段
+            content: 可选的文本内容
+
+        Returns:
+            dict: 富媒体消息数据
+        """
+        return {
+            "content": content,
+            "msg_type": 7,  # 7表示富媒体类型
+            "media": media_info
+        }
+
+    @staticmethod
+    def build_video_message(media_info, content=""):
+        """
+        构建视频消息
+
+        Args:
+            media_info: 视频媒体信息
+            content: 可选的文本内容
+
+        Returns:
+            dict: 视频消息数据
+        """
+        return MessageBuilder.build_media_message(media_info, content)
+
+    @staticmethod
+    def build_audio_message(media_info, content=""):
+        """
+        构建语音消息
+
+        Args:
+            media_info: 语音媒体信息
+            content: 可选的文本内容
+
+        Returns:
+            dict: 语音消息数据
+        """
+        return MessageBuilder.build_media_message(media_info, content)
+
+    @staticmethod
+    def build_markdown_message(content, markdown):
+        """构建Markdown消息"""
+        return {
+            "content": content,
+            "msg_type": 2,  # 2表示markdown类型
+            "markdown": markdown
+        }
+
+    @staticmethod
+    def build_ark_message(ark):
+        """构建ARK消息"""
+        return {
+            "msg_type": 3,  # 3表示ark类型
+            "ark": ark
+        }
+
+    @staticmethod
+    def build_file_message(file_info):
+        """构建文件消息"""
+        return {
+            "msg_type": 7,  # 7表示富媒体/文件类型
+            "media": file_info
         }
 
 class MessageSender:
@@ -302,6 +373,54 @@ class MessageSender:
             logger.error(f"回复私聊消息异常: {str(e)}")
             raise
 
+    @staticmethod
+    def upload_private_media(user_openid: str, file_type: int, url: str, srv_send_msg: bool = False):
+        """
+        上传单聊富媒体文件
+
+        Args:
+            user_openid: QQ用户的openid
+            file_type: 媒体类型，1=图片png/jpg，2=视频mp4，3=语音silk，4=文件（暂不开放）
+            url: 需要发送媒体资源的url
+            srv_send_msg: 设置true会直接发送消息到目标端，且会占用主动消息频次
+
+        Returns:
+            dict: 包含file_uuid, file_info, ttl等字段的响应数据
+        """
+        # 使用Bot令牌进行认证
+        headers = auth_manager.get_auth_header(use_bot_token=True)
+
+        # 构建API URL
+        api_url = f"{API_BASE_URL}/v2/users/{user_openid}/files"
+
+        # 构建请求数据
+        data = {
+            "file_type": file_type,
+            "url": url,
+            "srv_send_msg": srv_send_msg
+        }
+
+        logger.info(f"上传单聊媒体文件到用户 {user_openid}, 类型: {file_type}, URL: {url}")
+        logger.info(f"上传请求数据: {data}")
+
+        try:
+            response = requests.post(api_url, headers=headers, json=data)
+            logger.info(f"API响应状态码: {response.status_code}")
+            logger.info(f"API响应内容: {response.text}")
+            trace_id = response.headers.get("X-Tps-trace-ID")
+            if trace_id:
+                logger.debug(f"X-Tps-trace-ID: {trace_id}")
+
+            if response.status_code != 200:
+                logger.error(f"上传单聊媒体文件失败: {response.text}")
+                raise Exception(f"上传单聊媒体文件失败: {response.text}")
+
+            logger.info("单聊媒体文件上传成功")
+            return response.json()
+        except Exception as e:
+            logger.error(f"上传单聊媒体文件异常: {str(e)}")
+            raise
+
     # 新增的增强消息发送方法
     @staticmethod
     def send_enhanced_message(target_id: str, message_data: Dict[str, Any], is_group: bool = False, is_private: bool = False):
@@ -356,3 +475,82 @@ class MessageSender:
         """发送ARK消息"""
         message_data = MessageBuilder.build_ark_message(ark)
         return MessageSender.send_enhanced_message(target_id, message_data, is_group, is_private)
+
+    @staticmethod
+    def send_private_media_message(user_openid: str, file_type: int, url: str, content: str = "", srv_send_msg: bool = False):
+        """
+        发送单聊富媒体消息（一站式方法）
+
+        Args:
+            user_openid: QQ用户的openid
+            file_type: 媒体类型，1=图片，2=视频，3=语音，4=文件（暂不开放）
+            url: 媒体资源的URL
+            content: 可选的文本内容
+            srv_send_msg: 是否直接发送（true会占用主动消息频次）
+
+        Returns:
+            dict: API响应结果
+        """
+        if srv_send_msg:
+            # 直接发送模式
+            return MessageSender.upload_private_media(user_openid, file_type, url, True)
+        else:
+            # 两步发送模式：先上传，再发送
+            # 1. 上传媒体文件
+            upload_result = MessageSender.upload_private_media(user_openid, file_type, url, False)
+
+            # 2. 构建并发送富媒体消息
+            media_info = {
+                "file_info": upload_result.get("file_info")
+            }
+            message_data = MessageBuilder.build_media_message(media_info, content)
+
+            return MessageSender.send_enhanced_message(user_openid, message_data, is_private=True)
+
+    @staticmethod
+    def send_private_video_message(user_openid: str, video_url: str, content: str = "", srv_send_msg: bool = False):
+        """
+        发送单聊视频消息
+
+        Args:
+            user_openid: QQ用户的openid
+            video_url: 视频文件的URL（MP4格式）
+            content: 可选的文本内容
+            srv_send_msg: 是否直接发送
+
+        Returns:
+            dict: API响应结果
+        """
+        return MessageSender.send_private_media_message(user_openid, 2, video_url, content, srv_send_msg)
+
+    @staticmethod
+    def send_private_audio_message(user_openid: str, audio_url: str, content: str = "", srv_send_msg: bool = False):
+        """
+        发送单聊语音消息
+
+        Args:
+            user_openid: QQ用户的openid
+            audio_url: 语音文件的URL（SILK格式）
+            content: 可选的文本内容
+            srv_send_msg: 是否直接发送
+
+        Returns:
+            dict: API响应结果
+        """
+        return MessageSender.send_private_media_message(user_openid, 3, audio_url, content, srv_send_msg)
+
+    @staticmethod
+    def send_private_image_message(user_openid: str, image_url: str, content: str = "", srv_send_msg: bool = False):
+        """
+        发送单聊图片消息
+
+        Args:
+            user_openid: QQ用户的openid
+            image_url: 图片文件的URL（PNG/JPG格式）
+            content: 可选的文本内容
+            srv_send_msg: 是否直接发送
+
+        Returns:
+            dict: API响应结果
+        """
+        return MessageSender.send_private_media_message(user_openid, 1, image_url, content, srv_send_msg)
