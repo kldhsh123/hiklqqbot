@@ -5,9 +5,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 机器人配置
-BOT_APPID = os.getenv("BOT_APPID")
-BOT_APPSECRET = os.getenv("BOT_APPSECRET")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_APPID = os.getenv("BOT_APPID")          # 机器人应用ID
+BOT_APPSECRET = os.getenv("BOT_APPSECRET")  # 机器人应用密钥，用于获取动态APP_ACCESS_TOKEN
+BOT_TOKEN = os.getenv("BOT_TOKEN")          # 机器人Token，仅用于Webhook模式的签名验证，API调用已统一使用动态APP_ACCESS_TOKEN
 
 # 通信方式配置 (可选: "webhook" 或 "websocket")
 COMM_MODE = os.getenv("COMM_MODE", "websocket")

@@ -15,8 +15,8 @@ from config import (
 
 # 动态导入botpy模块
 try:
-    # 添加botpy-master路径到sys.path
-    botpy_path = os.path.join(os.path.dirname(__file__), 'botpy-master')
+    # 添加botpy路径到sys.path
+    botpy_path = os.path.join(os.path.dirname(__file__), 'botpy')
     if botpy_path not in sys.path:
         sys.path.insert(0, botpy_path)
     

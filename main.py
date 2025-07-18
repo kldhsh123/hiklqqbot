@@ -201,11 +201,11 @@ async def main_async():
     if USE_BOTPY_CLIENT:
         if not BOTPY_INTEGRATION_AVAILABLE:
             logger.error("Botpy集成不可用，但配置要求使用Botpy客户端")
-            logger.error("请检查botpy-master目录是否存在，或设置USE_BOTPY_CLIENT=false")
+            logger.error("请检查botpy目录是否存在，或设置USE_BOTPY_CLIENT=false")
             return
         if not BOTPY_AVAILABLE:
             logger.error("Botpy SDK不可用，但配置要求使用Botpy客户端")
-            logger.error("请检查botpy-master目录中的SDK是否完整")
+            logger.error("请检查botpy目录中的SDK是否完整")
             return
 
     # 根据配置选择客户端类型
