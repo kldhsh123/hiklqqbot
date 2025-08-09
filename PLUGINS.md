@@ -21,6 +21,13 @@ HiklQQBot 采用插件化设计，这里收集了可用的插件资源，便于�
 
 以下是社区贡献的插件，通过安装这些插件可以扩展机器人功能。
 
+### 秘密实验室服务器查询插件
+- **作者**: SL-114514NM
+- **仓库**: [HiklQQBot-CXServerPlugin](https://github.com/SL-114514NM/HiklQQBot-CXServerPlugin)
+- **描述**: 查询绑定的SCP SL服务器信息，使用官方API
+- **命令**: /绑定服务器,/CX
+- **安装**: 放置与plugins文件夹内即可
+
 ### 幸福工厂服务器工具箱
 - **作者**: Sakura
 - **仓库**: [Satisfactory-QQbot](https://github.com/NY1200NY/Satisfactory-QQbot)
