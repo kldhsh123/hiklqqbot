@@ -326,7 +326,8 @@ if ENABLE_AI_CHAT:
             
             try:
                 # 使用更短的超时时间，防止WebSocket连接超时
-                timeout = aiohttp.ClientTimeout(total=20, connect=5, sock_connect=5, sock_read=15)
+                timeout = aiohttp.ClientTimeout(total=40, connect=5, sock_connect=5, sock_read=30)
+
                 
                 # 创建会话时禁用自动解压
                 conn = aiohttp.TCPConnector(force_close=True)  # 强制关闭连接，避免连接池问题
@@ -343,7 +344,7 @@ if ENABLE_AI_CHAT:
                         
                         # 读取原始响应文本，设置超时
                         try:
-                            response_text = await asyncio.wait_for(response.text(errors='replace'), timeout=10)
+                            response_text = await asyncio.wait_for(response.text(errors='replace'), timeout=30)
                             self.logger.info(f"API原始响应前500字符: {response_text[:500]}...")
                         except asyncio.TimeoutError:
                             self.logger.error("读取响应内容超时")
