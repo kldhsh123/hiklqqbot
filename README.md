@@ -230,7 +230,7 @@ class MyCustomPlugin(BasePlugin):
 
 1. **安装依赖失败**
    - 尝试使用 `pip install --upgrade pip` 更新 pip
-   - 对于编译依赖问题，Windows 用户可能需要安装 Visual C++ Build Tools
+   - 对于编译依赖问题，Windows 用户可能需要安装 Visual C++ Build Tools。或者使用py3.1版本，此版本无需编译。
 
 2. **无法收到事件**
    - 检查网络连接
