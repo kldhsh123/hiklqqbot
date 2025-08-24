@@ -246,7 +246,14 @@ if ENABLE_AI_CHAT:
             return API_STATUS["available"]
         
         def _extract_message_content(self, message_data: Union[Dict, str]) -> str:
-            """从消息中提取实际内容（去掉@部分）"""
+            """
+            Extract the human-readable message text from a message payload by removing common mention formats.
+            
+            This function accepts either a dict (expects a "content" key) or a string and strips platform-style mentions such as Discord `<@123...>`, `@username` (including CJK characters), CQ code `[CQ:at,qq=123456]`, and other `@...` patterns. If the input has no content, an empty string is returned. If cleaning removes all characters but the original content was non-empty, the original (uncleaned) content is returned to avoid losing the user's message.
+            
+            Returns:
+                str: The cleaned message text (or the original content if cleaning would produce an empty string).
+            """
             # 记录输入数据类型
             self.logger.info(f"提取消息内容，输入数据类型: {type(message_data)}")
             
@@ -290,19 +297,15 @@ if ENABLE_AI_CHAT:
 
         async def _call_ai_api(self, messages: List[Dict[str, str]]) -> str:
             """
-            调用已配置的 AI API，传入对话历史并返回助手的回复。
+            Call the configured AI API with the provided conversation messages and return the assistant's reply.
             
-            该函数会将提供的消息发送到 AI_CHAT_API_URL，使用已配置的模型、最大 token 数和温度。
-            如果第一条消息不是系统消息，将在开头插入一条系统提示（AI_CHAT_SYSTEM_PROMPT 或默认提示）——注意：这会修改提供的 `messages` 列表。
-            该函数会处理常见响应格式的 JSON 解析（OpenAI 风格的 `choices[0].message.content` 和通用的 `response` 字段），并返回纯文本回复，或者在请求或解析失败时返回简短的用户可见错误信息。
-            
+            If the first message is not a system message, a system prompt (AI_CHAT_SYSTEM_PROMPT or a default prompt) will be inserted at index 0 — note: this may modify the supplied `messages` list. The function sends the messages to AI_CHAT_API_URL using the configured model, max tokens, and temperature, parses common JSON response shapes (OpenAI-style `choices[0].message.content` and a generic `response` field), and returns the assistant's reply as plain text. On request or parse failures, returns a short, user-visible error string.
+             
             Parameters:
-                messages (List[Dict[str, str]]): Conversation history as a list of message objects with at least
-                    the keys `"role"` (e.g., "system", "user", "assistant") and `"content"`. The list may be modified
-                    (a system message may be inserted at index 0).
+                messages (List[Dict[str, str]]): Conversation history as a list of message objects with keys "role" (e.g., "system", "user", "assistant") and "content". May be modified in-place.
             
             Returns:
-                str: The assistant's reply text on success, or a short error message suitable for displaying to users.
+                str: Assistant reply text on success, or a brief error message suitable for display to users.
             """
             self.logger.info(f"=== 开始调用AI API ===")
             
