@@ -289,7 +289,21 @@ if ENABLE_AI_CHAT:
             return clean_content
 
         async def _call_ai_api(self, messages: List[Dict[str, str]]) -> str:
-            """调用AI API获取回复"""
+            """
+            Call the configured AI API with a conversation history and return the assistant's reply.
+            
+            This sends the provided messages to AI_CHAT_API_URL using the configured model, max tokens and temperature.
+            If the first message is not a system message, a system prompt (AI_CHAT_SYSTEM_PROMPT or a default) will be inserted at the front — note: this mutates the provided `messages` list.
+            The function handles JSON parsing of common response shapes (OpenAI-style `choices[0].message.content` and a generic `response` field) and returns a plain string reply or a short user-facing error message when the request or parsing fails.
+            
+            Parameters:
+                messages (List[Dict[str, str]]): Conversation history as a list of message objects with at least
+                    the keys `"role"` (e.g., "system", "user", "assistant") and `"content"`. The list may be modified
+                    (a system message may be inserted at index 0).
+            
+            Returns:
+                str: The assistant's reply text on success, or a short error message suitable for displaying to users.
+            """
             self.logger.info(f"=== 开始调用AI API ===")
             
             # 设置请求头，明确指定不接受压缩内容
