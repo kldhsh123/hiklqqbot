@@ -289,7 +289,21 @@ if ENABLE_AI_CHAT:
             return clean_content
 
         async def _call_ai_api(self, messages: List[Dict[str, str]]) -> str:
-            """调用AI API获取回复"""
+            """
+            调用已配置的 AI API，传入对话历史并返回助手的回复。
+            
+            该函数会将提供的消息发送到 AI_CHAT_API_URL，使用已配置的模型、最大 token 数和温度。
+            如果第一条消息不是系统消息，将在开头插入一条系统提示（AI_CHAT_SYSTEM_PROMPT 或默认提示）——注意：这会修改提供的 `messages` 列表。
+            该函数会处理常见响应格式的 JSON 解析（OpenAI 风格的 `choices[0].message.content` 和通用的 `response` 字段），并返回纯文本回复，或者在请求或解析失败时返回简短的用户可见错误信息。
+            
+            Parameters:
+                messages (List[Dict[str, str]]): Conversation history as a list of message objects with at least
+                    the keys `"role"` (e.g., "system", "user", "assistant") and `"content"`. The list may be modified
+                    (a system message may be inserted at index 0).
+            
+            Returns:
+                str: The assistant's reply text on success, or a short error message suitable for displaying to users.
+            """
             self.logger.info(f"=== 开始调用AI API ===")
             
             # 设置请求头，明确指定不接受压缩内容
@@ -326,7 +340,8 @@ if ENABLE_AI_CHAT:
             
             try:
                 # 使用更短的超时时间，防止WebSocket连接超时
-                timeout = aiohttp.ClientTimeout(total=20, connect=5, sock_connect=5, sock_read=15)
+                timeout = aiohttp.ClientTimeout(total=40, connect=5, sock_connect=5, sock_read=30)
+
                 
                 # 创建会话时禁用自动解压
                 conn = aiohttp.TCPConnector(force_close=True)  # 强制关闭连接，避免连接池问题
@@ -343,7 +358,7 @@ if ENABLE_AI_CHAT:
                         
                         # 读取原始响应文本，设置超时
                         try:
-                            response_text = await asyncio.wait_for(response.text(errors='replace'), timeout=10)
+                            response_text = await asyncio.wait_for(response.text(errors='replace'), timeout=30)
                             self.logger.info(f"API原始响应前500字符: {response_text[:500]}...")
                         except asyncio.TimeoutError:
                             self.logger.error("读取响应内容超时")
