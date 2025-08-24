@@ -290,11 +290,11 @@ if ENABLE_AI_CHAT:
 
         async def _call_ai_api(self, messages: List[Dict[str, str]]) -> str:
             """
-            Call the configured AI API with a conversation history and return the assistant's reply.
+            调用已配置的 AI API，传入对话历史并返回助手的回复。
             
-            This sends the provided messages to AI_CHAT_API_URL using the configured model, max tokens and temperature.
-            If the first message is not a system message, a system prompt (AI_CHAT_SYSTEM_PROMPT or a default) will be inserted at the front — note: this mutates the provided `messages` list.
-            The function handles JSON parsing of common response shapes (OpenAI-style `choices[0].message.content` and a generic `response` field) and returns a plain string reply or a short user-facing error message when the request or parsing fails.
+            该函数会将提供的消息发送到 AI_CHAT_API_URL，使用已配置的模型、最大 token 数和温度。
+            如果第一条消息不是系统消息，将在开头插入一条系统提示（AI_CHAT_SYSTEM_PROMPT 或默认提示）——注意：这会修改提供的 `messages` 列表。
+            该函数会处理常见响应格式的 JSON 解析（OpenAI 风格的 `choices[0].message.content` 和通用的 `response` 字段），并返回纯文本回复，或者在请求或解析失败时返回简短的用户可见错误信息。
             
             Parameters:
                 messages (List[Dict[str, str]]): Conversation history as a list of message objects with at least
