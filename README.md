@@ -3,7 +3,7 @@
 HiklQQBot 是一个基于 Python 的 QQ 官方机器人框架，支持 WebSocket 和 Webhook 两种通信方式。本框架由 AI 辅助完成大部分编写，具有插件化设计，易于扩展和使用。  
 > **qq交流群:330316577**
 
-[![Python Version](https://img.shields.io/badge/python-3.10-blue)]()  
+[![Python Version](https://img.shields.io/badge/python-3.10-blue)](https://www.python.org/)
 
 友情链接:  
 [Linux.Do](https://linux.do/) 真诚、友善、团结、专业，共建你我引以为荣之社区。
@@ -233,7 +233,7 @@ class MyCustomPlugin(BasePlugin):
 
 1. **安装依赖失败**
    - 尝试使用 `pip install --upgrade pip` 更新 pip
-   - 对于编译依赖问题，Windows 用户可能需要安装 Visual C++ Build Tools。或者使用py3.1版本，此版本无需编译。
+   - 对于编译依赖问题，Windows 用户可能需要安装 Visual C++ Build Tools。或者使用py3.10版本，此版本无需编译。
 
 2. **无法收到事件**
    - 检查网络连接
