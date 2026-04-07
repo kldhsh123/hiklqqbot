@@ -3,7 +3,7 @@
 HiklQQBot 是一个基于 Python 的 QQ 官方机器人框架，支持 WebSocket 和 Webhook 两种通信方式。本框架由 AI 辅助完成大部分编写，具有插件化设计，易于扩展和使用。  
 > **qq交流群:330316577**
 
-[![Python Version](https://img.shields.io/badge/python-3.10-blue)]()  
+[![Python Version](https://img.shields.io/badge/python-3.10-blue)](https://www.python.org/)
 
 友情链接:  
 [Linux.Do](https://linux.do/) 真诚、友善、团结、专业，共建你我引以为荣之社区。
