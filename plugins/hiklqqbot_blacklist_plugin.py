@@ -4,6 +4,7 @@
 """
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from plugins.base_plugin import BasePlugin
@@ -87,18 +88,28 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
     async def _handle_add(self, args: List[str], admin_id: str) -> str:
         """处理添加命令"""
         if len(args) < 3:
-            return "❌ 参数不足\n用法: `/blacklist add <user|group> <ID> <原因> [过期时间]`"
-        
+            return "❌ 参数不足\n用法: `/hiklqqbot_blacklist add <user|group> <ID> <原因> [过期时间]`"
+
         target_type = args[0].lower()
         target_id = args[1]
-        reason = args[2]
         expires_at = None
-        
-        # 解析过期时间
-        if len(args) > 3:
-            expires_at = self._parse_expire_time(args[3])
-            if expires_at is None:
-                return "❌ 无效的过期时间格式\n支持格式: 1h(小时), 1d(天), 1w(周), 1m(月)"
+        reason_parts = args[2:]
+
+        # 仅将最后一个 token 识别为可选的过期时间，其余内容都属于原因文本。
+        if len(reason_parts) > 1:
+            last_token = reason_parts[-1]
+            parsed_expire_time = self._parse_expire_time(last_token)
+            if parsed_expire_time is not None:
+                expires_at = parsed_expire_time
+                reason_parts = reason_parts[:-1]
+            elif self._looks_like_expire_token(last_token):
+                return (
+                    "❌ 过期时间格式无效，请使用: 1h(小时)、1d(天)、1w(周)、1m(月)"
+                )
+
+        reason = " ".join(reason_parts).strip()
+        if not reason:
+            return "❌ 参数不足\n用法: `/hiklqqbot_blacklist add <user|group> <ID> <原因> [过期时间]`"
         
         if target_type == "user":
             success = blacklist_manager.add_user(target_id, reason, admin_id, expires_at)
@@ -121,7 +132,7 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
     async def _handle_remove(self, args: List[str]) -> str:
         """处理移除命令"""
         if len(args) < 2:
-            return "❌ 参数不足\n用法: `/blacklist remove <user|group> <ID>`"
+            return "❌ 参数不足\n用法: `/hiklqqbot_blacklist remove <user|group> <ID>`"
         
         target_type = args[0].lower()
         target_id = args[1]
@@ -178,13 +189,13 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
             result += f"• 用户: {stats['users']} 个\n"
             result += f"• 群组: {stats['groups']} 个\n"
             result += f"• 临时: {stats['temporary']} 个\n\n"
-            result += "使用 `/blacklist list users` 或 `/blacklist list groups` 查看详细列表"
+            result += "使用 `/hiklqqbot_blacklist list users` 或 `/hiklqqbot_blacklist list groups` 查看详细列表"
             return result
     
     async def _handle_info(self, args: List[str]) -> str:
         """处理信息查询命令"""
         if not args:
-            return "❌ 请提供要查询的ID\n用法: `/blacklist info <ID>`"
+            return "❌ 请提供要查询的ID\n用法: `/hiklqqbot_blacklist info <ID>`"
         
         target_id = args[0]
         entry = blacklist_manager.get_entry(target_id)
@@ -208,7 +219,7 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
     async def _handle_clear(self, args: List[str]) -> str:
         """处理清空命令"""
         if not args:
-            return "❌ 请指定清空类型\n用法: `/blacklist clear <all|users|groups>`"
+            return "❌ 请指定清空类型\n用法: `/hiklqqbot_blacklist clear <all|users|groups>`"
         
         clear_type = args[0].lower()
         
@@ -262,3 +273,9 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
             
         except (ValueError, IndexError):
             return None
+
+    def _looks_like_expire_token(self, token: str) -> bool:
+        """判断 token 是否看起来像过期时间参数。"""
+        if not token:
+            return False
+        return bool(re.match(r"^\d+[a-zA-Z]+$", token))
