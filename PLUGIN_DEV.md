@@ -826,41 +826,6 @@ class ConnectivityTestPlugin(BasePlugin):
 
         return "🔍 连通性测试结果:\n" + "\n".join(test_results)
 ```
-
-### 完整示例插件
-
-我们提供了一个完整的富媒体发送教程插件 `plugins/rich_media_tutorial_plugin.py`，它演示了：
-
-- ✅ 图片、视频、语音的发送
-- ✅ 文件格式验证
-- ✅ 错误处理和调试
-- ✅ 连通性测试
-- ✅ 详细的日志记录
-
-**使用方法：**
-
-```bash
-# 发送图片
-rich_media image https://example.com/image.jpg 这是一张图片
-
-# 发送视频
-rich_media video https://example.com/video.mp4 精彩视频
-
-# 发送语音
-rich_media audio https://example.com/voice.silk 语音消息
-
-# 测试文件
-rich_media test https://example.com/file.jpg
-
-# 调试信息
-rich_media debug
-
-# 查看帮助
-rich_media help
-```
-
-这个插件可以作为您开发富媒体功能的参考模板。
-
 ### 回复私聊消息
 
 您可以回复用户发送的私聊消息：
