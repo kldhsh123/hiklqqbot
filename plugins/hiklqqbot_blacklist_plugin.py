@@ -4,6 +4,7 @@
 """
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from plugins.base_plugin import BasePlugin
@@ -96,10 +97,15 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
 
         # 仅将最后一个 token 识别为可选的过期时间，其余内容都属于原因文本。
         if len(reason_parts) > 1:
-            parsed_expire_time = self._parse_expire_time(reason_parts[-1])
+            last_token = reason_parts[-1]
+            parsed_expire_time = self._parse_expire_time(last_token)
             if parsed_expire_time is not None:
                 expires_at = parsed_expire_time
                 reason_parts = reason_parts[:-1]
+            elif self._looks_like_expire_token(last_token):
+                return (
+                    "❌ 过期时间格式无效，请使用: 1h(小时)、1d(天)、1w(周)、1m(月)"
+                )
 
         reason = " ".join(reason_parts).strip()
         if not reason:
@@ -267,3 +273,9 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
             
         except (ValueError, IndexError):
             return None
+
+    def _looks_like_expire_token(self, token: str) -> bool:
+        """判断 token 是否看起来像过期时间参数。"""
+        if not token:
+            return False
+        return bool(re.match(r"^\d+[a-zA-Z]+$", token))
