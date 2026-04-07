@@ -12,8 +12,6 @@ from auth_manager import auth_manager
 
 logger = logging.getLogger("hiklqqbot_blacklist_plugin")
 
-COMMAND_NAME = "/hiklqqbot_blacklist"
-
 class HiklqqbotBlacklistPlugin(BasePlugin):
     """黑名单管理插件"""
 
@@ -89,8 +87,8 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
     async def _handle_add(self, args: List[str], admin_id: str) -> str:
         """处理添加命令"""
         if len(args) < 3:
-            return f"❌ 参数不足\n用法: `{COMMAND_NAME} add <user|group> <ID> <原因> [过期时间]`"
-        
+            return "❌ 参数不足\n用法: `/hiklqqbot_blacklist add <user|group> <ID> <原因> [过期时间]`"
+
         target_type = args[0].lower()
         target_id = args[1]
         expires_at = None
@@ -105,7 +103,7 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
 
         reason = " ".join(reason_parts).strip()
         if not reason:
-            return f"❌ 参数不足\n用法: `{COMMAND_NAME} add <user|group> <ID> <原因> [过期时间]`"
+            return "❌ 参数不足\n用法: `/hiklqqbot_blacklist add <user|group> <ID> <原因> [过期时间]`"
         
         if target_type == "user":
             success = blacklist_manager.add_user(target_id, reason, admin_id, expires_at)
@@ -128,7 +126,7 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
     async def _handle_remove(self, args: List[str]) -> str:
         """处理移除命令"""
         if len(args) < 2:
-            return f"❌ 参数不足\n用法: `{COMMAND_NAME} remove <user|group> <ID>`"
+            return "❌ 参数不足\n用法: `/hiklqqbot_blacklist remove <user|group> <ID>`"
         
         target_type = args[0].lower()
         target_id = args[1]
@@ -185,13 +183,13 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
             result += f"• 用户: {stats['users']} 个\n"
             result += f"• 群组: {stats['groups']} 个\n"
             result += f"• 临时: {stats['temporary']} 个\n\n"
-            result += f"使用 `{COMMAND_NAME} list users` 或 `{COMMAND_NAME} list groups` 查看详细列表"
+            result += "使用 `/hiklqqbot_blacklist list users` 或 `/hiklqqbot_blacklist list groups` 查看详细列表"
             return result
     
     async def _handle_info(self, args: List[str]) -> str:
         """处理信息查询命令"""
         if not args:
-            return f"❌ 请提供要查询的ID\n用法: `{COMMAND_NAME} info <ID>`"
+            return "❌ 请提供要查询的ID\n用法: `/hiklqqbot_blacklist info <ID>`"
         
         target_id = args[0]
         entry = blacklist_manager.get_entry(target_id)
@@ -215,7 +213,7 @@ class HiklqqbotBlacklistPlugin(BasePlugin):
     async def _handle_clear(self, args: List[str]) -> str:
         """处理清空命令"""
         if not args:
-            return f"❌ 请指定清空类型\n用法: `{COMMAND_NAME} clear <all|users|groups>`"
+            return "❌ 请指定清空类型\n用法: `/hiklqqbot_blacklist clear <all|users|groups>`"
         
         clear_type = args[0].lower()
         
