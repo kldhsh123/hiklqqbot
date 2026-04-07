@@ -21,6 +21,7 @@ BUILTIN_PLUGINS = [
 # 其他插件列表
 EXTENSION_PLUGINS = [
     "fortune_plugin",  # 运势插件
+    "roll_plugin",  # 掷骰子插件
 ]
 
 # 导出所有插件
