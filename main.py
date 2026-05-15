@@ -6,15 +6,7 @@ from config import BOT_APPID, BOT_APPSECRET, BOT_TOKEN, COMM_MODE
 from websocket_client import ws_client
 from webhook_server import webhook_server
 from plugins.plugin_manager import plugin_manager
-from auth_manager import auth_manager
 from stats_manager import stats_manager
-from event_handler import event_handler
-from plugins.hiklqqbot_admin_plugin import HiklqqbotAdminPlugin
-from plugins.hiklqqbot_maintenance_plugin import HiklqqbotMaintenancePlugin
-from plugins.hiklqqbot_userid_plugin import HiklqqbotUseridPlugin
-from plugins.hiklqqbot_reload_plugin import HiklqqbotReloadPlugin
-from plugins.hiklqqbot_stats_plugin import HiklqqbotStatsPlugin
-from plugins.hiklqqbot_blacklist_plugin import HiklqqbotBlacklistPlugin
 
 # 确保彩色日志格式化器模块可用
 try:
@@ -118,17 +110,6 @@ def init_stats_system():
     _ = stats_manager.initialized
     logger.info("统计系统已初始化")
 
-def register_builtin_plugins():
-    """
-    注册系统内置插件
-    """
-    plugin_manager.register_plugin(HiklqqbotAdminPlugin())
-    plugin_manager.register_plugin(HiklqqbotMaintenancePlugin())
-    plugin_manager.register_plugin(HiklqqbotUseridPlugin())
-    plugin_manager.register_plugin(HiklqqbotReloadPlugin())
-    plugin_manager.register_plugin(HiklqqbotStatsPlugin())  # 注册统计插件
-    plugin_manager.register_plugin(HiklqqbotBlacklistPlugin())  # 注册黑名单插件
-
 async def main_async():
     """异步主程序"""
     logger.info("正在启动QQ机器人...")
@@ -143,10 +124,7 @@ async def main_async():
     # 加载所有插件
     logger.info("正在加载插件...")
     plugin_manager.load_plugins("plugins")
-    
-    # 注册内置插件
-    register_builtin_plugins()
-    
+
     logger.info(f"通信模式: {COMM_MODE}")
     logger.info(f"Bot AppID: {BOT_APPID}")
 

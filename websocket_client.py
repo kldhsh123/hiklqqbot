@@ -65,7 +65,7 @@ class WebSocketClient:
                     self.heartbeat_task = asyncio.create_task(self.heartbeat_loop())
                     
                     # 判断是否有会话ID和序列号，如果有则尝试恢复会话，否则重新鉴权
-                    if self.session_id and self.last_sequence:
+                    if self.session_id and self.last_sequence is not None:
                         try:
                             await self.resume()
                         except Exception as e:
@@ -175,21 +175,22 @@ class WebSocketClient:
         try:
             while self.connected:
                 try:
-                    # 添加消息接收超时
                     message = await asyncio.wait_for(self.ws.recv(), timeout=60)
+                except asyncio.TimeoutError:
+                    logger.warning("超过60秒未收到消息，发送额外心跳保活")
+                    try:
+                        await self.send_heartbeat()
+                    except Exception as e:
+                        logger.error(f"发送保活心跳失败: {e}")
+                        break
+                    continue
+
+                try:
                     # 处理消息时添加超时保护
                     await asyncio.wait_for(self.process_message(message), timeout=30)
-                except asyncio.TimeoutError as e:
-                    if "recv" in str(e):
-                        logger.warning("超过60秒未收到消息，发送额外心跳保活")
-                        try:
-                            await self.send_heartbeat()
-                        except:
-                            logger.error("发送保活心跳失败")
-                            break
-                    else:
-                        logger.error(f"处理消息超时: {e}")
-                        # 继续监听，不断开连接
+                except asyncio.TimeoutError:
+                    logger.error("处理消息超时（30秒）")
+                    # 继续监听，不断开连接
         except websockets.ConnectionClosed as e:
             logger.warning(f"WebSocket连接已关闭: {e}")
             self.connected = False
@@ -202,9 +203,12 @@ class WebSocketClient:
     
     async def process_message(self, message):
         """处理接收到的消息"""
+        op_code = None
+        event_type = None
         try:
             data = json.loads(message)
             op_code = data.get("op", None)
+            event_type = data.get("t", None)
             
             # 更新最后的序列号，用于心跳和重连
             if "s" in data and data["s"] is not None:
@@ -222,7 +226,7 @@ class WebSocketClient:
             else:
                 logger.info(f"收到未处理的操作码: {op_code}")
         except asyncio.TimeoutError:
-            logger.error("处理消息超时")
+            logger.error(f"处理分发事件超时: op={op_code}, event={event_type}")
         except Exception as e:
             logger.error(f"处理消息异常: {e}")
     

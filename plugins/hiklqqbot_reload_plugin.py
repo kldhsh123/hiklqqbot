@@ -32,50 +32,45 @@ class HiklqqbotReloadPlugin(BasePlugin):
         # 检查用户是否是管理员
         if not auth_manager.is_admin(user_id):
             return "您没有权限执行此命令，请联系管理员"
-        
+
+        old_plugins = plugin_manager.plugins.copy()
         try:
             # 清空当前插件列表前先保存命令列表
-            old_commands = list(plugin_manager.plugins.keys())
+            old_commands = list(old_plugins.keys())
             old_plugin_count = len(old_commands)
-            
+
             # 重载特定模块
             for name, module in list(sys.modules.items()):
-                if name.startswith('plugins.') and name not in ['plugins.plugin_manager', 'plugins.base_plugin', 'plugins.hiklqqbot_reload_plugin']:
+                if name.startswith('plugins.') and name not in ['plugins.plugin_manager', 'plugins.base_plugin']:
                     try:
                         self.logger.debug(f"重载模块: {name}")
                         importlib.reload(module)
                     except Exception as e:
                         self.logger.error(f"重载模块 {name} 失败: {str(e)}")
-            
+
             # 清空插件列表
-            old_plugins = plugin_manager.plugins.copy()
             plugin_manager.plugins.clear()
-            
-            # 保留当前reload插件
-            reload_plugin = old_plugins.get('/hiklqqbot_reload')
-            if reload_plugin:
-                plugin_manager.register_plugin(reload_plugin)
-            
+
             # 重新加载所有插件
             plugin_manager.load_plugins("plugins")
-            
+
             # 计算新增和删除的插件
             new_commands = list(plugin_manager.plugins.keys())
             new_plugin_count = len(new_commands)
-            
+
             added_plugins = [cmd for cmd in new_commands if cmd not in old_commands]
             removed_plugins = [cmd for cmd in old_commands if cmd not in new_commands]
-            
+
             # 准备响应消息
             response = f"插件热重载完成!\n"
             response += f"- 原插件数量: {old_plugin_count}\n"
             response += f"- 当前插件数量: {new_plugin_count}\n"
-            
+
             if added_plugins:
                 response += f"- 新增插件: {', '.join(added_plugins)}\n"
             if removed_plugins:
                 response += f"- 移除插件: {', '.join(removed_plugins)}\n"
-                
+
             # 显示当前可用命令
             response += "\n当前可用命令:\n"
             for cmd in sorted(new_commands):
@@ -84,8 +79,10 @@ class HiklqqbotReloadPlugin(BasePlugin):
                     response += f"- {cmd}: {plugin.description}\n"
             
             return response
-            
+
         except Exception as e:
+            plugin_manager.plugins.clear()
+            plugin_manager.plugins.update(old_plugins)
             error_msg = f"插件热重载失败: {str(e)}"
             self.logger.error(error_msg)
             return error_msg

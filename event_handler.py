@@ -220,13 +220,20 @@ class EventHandler:
             return False
 
         event_type = event_data.get("type")
-        if isinstance(response, Reply):
+        responses = response if isinstance(response, list) else [response]
+        sent = False
+
+        for idx, item in enumerate(responses, start=msg_seq):
+            if not item:
+                continue
+
+            reply = item if isinstance(item, Reply) else Reply(text=str(item))
             await self._send_rich_reply(
-                target_id, message_id, is_group, event_type, response, event_data, msg_seq=msg_seq
+                target_id, message_id, is_group, event_type, reply, event_data, msg_seq=idx
             )
-        else:
-            await self._send_reply(target_id, message_id, is_group, event_type, str(response))
-        return True
+            sent = True
+
+        return sent
 
     async def _run_plugin_and_reply(self, plugin, params: str, user_id: str, event_data: dict, invoked_command: str = None):
         """在后台运行插件并处理回复"""
@@ -603,7 +610,7 @@ class EventHandler:
             return
 
         # 构造 payload
-        ws_event_id = event_data.get("_ws_event_id")
+        ws_event_id = event_data.get("_ws_event_id") if (not message_id and msg_seq == 1) else None
         payload = reply.to_payload(message_id=message_id, event_id=ws_event_id, msg_seq=msg_seq)
 
         try:

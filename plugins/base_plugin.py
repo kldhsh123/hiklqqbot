@@ -118,12 +118,15 @@ class BasePlugin(ABC):
         return None
 
     @abstractmethod
-    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> Union[str, Reply, None]:
+    async def handle(
+        self, params: str, user_id: str = None, group_openid: str = None, **kwargs
+    ) -> Union[str, Reply, List[Union[str, Reply]], None]:
         """处理命令。
 
         返回:
             str: 作为纯文本回复
             Reply: 富回复 (markdown/按钮/媒体)
+            List[str | Reply]: 多条消息按顺序发送
             None: 不发送回复 (插件已自行发送)
         """
         pass
@@ -285,28 +288,48 @@ class BasePlugin(ABC):
             data["event_id"] = event_id
         return await asyncio.to_thread(self._do_post, self._messages_url(target_id, is_group), data)
 
-    async def reply_with(self, reply: Reply, event_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def reply_with(
+        self, reply: Reply, event_data: Dict[str, Any], msg_seq: int = 1
+    ) -> Optional[Dict[str, Any]]:
         """根据 event_data 自动推断目标, 发送 Reply 对象。
 
         适合插件想直接发送多条消息时使用。
         """
         if reply.is_empty():
             return None
-        target_id, is_group = self._resolve_target_from_event(event_data)
+        target_id, target_kind = self._resolve_target_from_event(event_data)
         if not target_id:
             self.logger.warning("reply_with: 无法从 event_data 推断目标")
             return None
-        payload = reply.to_payload(
-            message_id=event_data.get("id"),
-            event_id=event_data.get("_ws_event_id"),
+
+        message_id, event_id = self._resolve_reply_binding_from_event(event_data)
+
+        # 频道消息不走 v2/groups 或 v2/users，且 markdown/按钮会退化为纯文本。
+        if target_kind == "channel":
+            from message import MessageSender
+
+            text = reply.markdown or reply.text or "(消息)"
+            if message_id:
+                return await asyncio.to_thread(
+                    MessageSender.reply_message, target_id, message_id, "text", text, False
+                )
+            return await asyncio.to_thread(
+                MessageSender.send_message, target_id, "text", text, False
+            )
+
+        payload = reply.to_payload(message_id=message_id, event_id=event_id, msg_seq=msg_seq)
+        return await asyncio.to_thread(
+            self._do_post, self._messages_url(target_id, target_kind == "group"), payload
         )
-        return await asyncio.to_thread(self._do_post, self._messages_url(target_id, is_group), payload)
 
     def _resolve_target_from_event(self, event_data: Dict[str, Any]):
-        """从事件数据推断 (target_id, is_group)"""
+        """从事件数据推断 (target_id, target_kind)。"""
         group_openid = event_data.get("group_openid")
         if group_openid:
-            return group_openid, True
+            return group_openid, "group"
+        channel_id = event_data.get("channel_id")
+        if channel_id:
+            return channel_id, "channel"
         author = event_data.get("author", {}) or {}
         user_openid = (
             author.get("user_openid")
@@ -315,4 +338,12 @@ class BasePlugin(ABC):
             or event_data.get("openid")
             or event_data.get("group_member_openid")
         )
-        return user_openid, False
+        if user_openid:
+            return user_openid, "private"
+        return None, None
+
+    def _resolve_reply_binding_from_event(self, event_data: Dict[str, Any]):
+        """从事件数据推断被动消息绑定字段。"""
+        if event_data.get("type") == "INTERACTION_CREATE":
+            return None, event_data.get("_ws_event_id") or event_data.get("id")
+        return event_data.get("id"), event_data.get("_ws_event_id")
