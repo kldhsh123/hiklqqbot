@@ -106,7 +106,9 @@ class WebSocketClient:
                 "op": 2,
                 "d": {
                     "token": token,
-                    "intents": 1 << 25 | 1 << 0 | 1 << 1 | 1 << 30,  # 添加所需的意图，包括群聊@消息
+                    # 1<<0 GUILDS, 1<<1 GUILD_MEMBERS, 1<<25 PUBLIC_MESSAGES (V2群/单聊),
+                    # 1<<26 INTERACTION (按钮回调), 1<<30 PUBLIC_GUILD_MESSAGES
+                    "intents": 1 << 25 | 1 << 0 | 1 << 1 | 1 << 26 | 1 << 30,
                     "shard": [0, 1],  # 单分片
                     "properties": {
                         "$os": "windows",
@@ -229,6 +231,10 @@ class WebSocketClient:
         try:
             event_type = data.get("t", None)
             event_data = data.get("d", {})
+            # WebSocket dispatch 包顶层的 id 是事件唯一ID, 用于被动消息的 event_id 字段
+            ws_event_id = data.get("id")
+            if ws_event_id and isinstance(event_data, dict):
+                event_data.setdefault("_ws_event_id", ws_event_id)
             
             if event_type:
                 logger.info(f"收到事件: {event_type}")

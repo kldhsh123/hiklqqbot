@@ -27,13 +27,6 @@ API_BASE_URL = "https://api.sgroup.qq.com"
 API_AUTH_URL = "https://bots.qq.com/app/getAppAccessToken"  # 正确的OAuth认证端点
 API_SEND_MESSAGE_URL = f"{API_BASE_URL}/v2/messages"
 
-# Botpy集成配置
-USE_BOTPY_CLIENT = os.getenv("USE_BOTPY_CLIENT", "false").lower() == "true"
-BOTPY_INTENTS = os.getenv("BOTPY_INTENTS", "public_messages,public_guild_messages,direct_message")
-BOTPY_LOG_LEVEL = os.getenv("BOTPY_LOG_LEVEL", "INFO")
-BOTPY_TIMEOUT = int(os.getenv("BOTPY_TIMEOUT", "5"))
-BOTPY_IS_SANDBOX = os.getenv("BOTPY_IS_SANDBOX", "false").lower() == "true"
-
 # 统计系统配置
 STATS_MAX_MONTHS = int(os.getenv("STATS_MAX_MONTHS", "12"))
 
@@ -42,3 +35,8 @@ ENABLE_BLACKLIST = os.getenv("ENABLE_BLACKLIST", "true").lower() == "true"
 BLACKLIST_AUTO_SAVE = os.getenv("BLACKLIST_AUTO_SAVE", "true").lower() == "true"
 BLACKLIST_LOG_BLOCKED = os.getenv("BLACKLIST_LOG_BLOCKED", "true").lower() == "true"
 BLACKLIST_SHOW_REASON = os.getenv("BLACKLIST_SHOW_REASON", "true").lower() == "true"
+
+# Help 菜单配置
+HELP_SHOW_BUTTONS = os.getenv("HELP_SHOW_BUTTONS", "true").lower() == "true"
+HELP_BUTTON_ACTION_TYPE = int(os.getenv("HELP_BUTTON_ACTION_TYPE", "2"))  # 2=发送型, 1=回调型
+HELP_PAGE_SIZE = int(os.getenv("HELP_PAGE_SIZE", "5"))  # 每页命令数

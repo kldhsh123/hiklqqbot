@@ -5,6 +5,14 @@ import logging
 import json
 from datetime import datetime, timedelta
 import time
+from urllib.parse import quote
+from reply import Reply
+from ui_builder import make_command_button, make_button_row, make_keyboard
+
+
+def _cmd_input(text: str, show: str) -> str:
+    return f'<qqbot-cmd-input text="{quote(text, safe="")}" show="{show}" reference="false" />'
+
 
 class HiklqqbotStatsPlugin(BasePlugin):
     """
@@ -14,10 +22,12 @@ class HiklqqbotStatsPlugin(BasePlugin):
     
     def __init__(self):
         super().__init__(
-            command="hiklqqbot_stats", 
+            command="hiklqqbot_stats",
             description="查看机器人统计数据 (仅管理员)",
             is_builtin=True,
-            hidden=False
+            hidden=False,
+            category="管理",
+            display_name="统计数据"
         )
         self.logger = logging.getLogger("plugin.hiklqqbot_stats")
         
@@ -35,31 +45,52 @@ class HiklqqbotStatsPlugin(BasePlugin):
             "help": self._handle_help
         }
     
-    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
-        """
-        处理统计命令
-        
-        格式: hiklqqbot_stats <子命令> [参数]
-        """
-        # 只允许管理员使用
+    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs):
+        """处理统计命令"""
         if not auth_manager.is_admin(user_id):
             return "权限不足，此命令仅限管理员使用"
-        
-        # 解析子命令和参数
+
         parts = params.strip().split(maxsplit=1)
-        subcommand = parts[0].lower() if parts else "help"
+        subcommand = parts[0].lower() if parts else ""
         subparams = parts[1] if len(parts) > 1 else ""
-        
-        # 如果没有子命令，显示帮助
-        if not subcommand:
-            return await self._handle_help(subparams)
-        
-        # 执行对应的子命令处理函数
+
+        # 无子命令 或 help: 返回富菜单
+        if subcommand in ("", "help", "menu"):
+            return self._build_menu_reply(user_id)
+
         handler = self.subcommands.get(subcommand)
         if handler:
             return await handler(subparams)
-        else:
-            return f"未知的子命令: {subcommand}\n输入 'hiklqqbot_stats help' 获取帮助"
+        return f"未知的子命令: {subcommand}\n输入 'hiklqqbot_stats help' 获取帮助"
+
+    def _build_menu_reply(self, user_id: str) -> Reply:
+        """统计菜单: markdown 命令清单 + 快捷按钮"""
+        lines = [
+            "# 📊 统计数据",
+            "",
+            "**点击下方文字快速查询**",
+            "",
+            f"{_cmd_input('/hiklqqbot_stats groups', '群组列表')} │ {_cmd_input('/hiklqqbot_stats users', '用户列表')}",
+            "***",
+            f"{_cmd_input('/hiklqqbot_stats usage', '命令使用统计')} │ {_cmd_input('/hiklqqbot_stats daily', '今日统计')}",
+            "***",
+            f"{_cmd_input('/hiklqqbot_stats weekly', '本周统计')} │ {_cmd_input('/hiklqqbot_stats monthly', '本月统计')}",
+            "***",
+            f"{_cmd_input('/hiklqqbot_stats group ', '查群信息…')} │ {_cmd_input('/hiklqqbot_stats user ', '查用户信息…')}",
+            "***",
+            f"{_cmd_input('/hiklqqbot_stats lookup ', 'ID查询…')}",
+            "",
+        ]
+        perm_users = [user_id] if user_id else None
+        keyboard = make_keyboard([
+            make_button_row([
+                make_command_button("admin_menu", "管理菜单", "/help 管理",
+                                     action_type=2, permission_user_ids=perm_users, style=1),
+                make_command_button("home", "主菜单", "/help",
+                                     action_type=2, permission_user_ids=perm_users, style=0),
+            ]),
+        ])
+        return Reply(markdown="\n".join(lines), keyboard=keyboard)
     
     async def _handle_help(self, params: str) -> str:
         """显示帮助信息"""

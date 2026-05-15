@@ -226,23 +226,37 @@ class StatsManager:
     
     # 群组相关方法
     def add_group(self, group_openid: str, name: str = None, op_member_openid: str = None):
-        """添加或更新群组信息"""
+        """添加或更新群组信息
+
+        Args:
+            group_openid: 群唯一标识
+            name: 当前群名 (本期事件无此字段, 预留接口)
+            op_member_openid: 操作者 openid
+        """
         current_time = time.time()
-        
+
         if group_openid not in self.groups:
-            self.groups[group_openid] = {
+            group_data = {
                 "join_time": current_time,
                 "members": [],
                 "last_active": current_time,
                 "added_by": op_member_openid
             }
-            self.logger.info(f"添加新群组: {group_openid}")
+            if name:
+                group_data["group_name"] = name
+                group_data["group_name_history"] = [
+                    {"name": name, "first_seen": current_time, "last_active": current_time}
+                ]
+            self.groups[group_openid] = group_data
+            self.logger.info(f"添加新群组: {group_openid} (name={name})")
         else:
             self.groups[group_openid]["last_active"] = current_time
-        
+            if name:
+                self._update_name_history(self.groups[group_openid], name, current_time, "group_name")
+
         # 确保群组有展示ID - 新增
         self.get_group_display_id(group_openid)
-        
+
         self._save_data()
         return self.groups[group_openid]
     
@@ -315,26 +329,82 @@ class StatsManager:
     
     # 用户相关方法
     def add_user(self, user_openid: str, name: str = None, avatar: str = None):
-        """添加或更新用户信息"""
+        """添加或更新用户信息
+
+        Args:
+            user_openid: 用户唯一标识
+            name: 当前用户名 (来自事件 author.username), 会更新 username 字段并维护 username_history
+            avatar: 头像URL (可选)
+        """
         current_time = time.time()
-        
+
         if user_openid not in self.users:
-            self.users[user_openid] = {
+            user_data = {
                 "first_seen": current_time,
                 "last_active": current_time,
                 "groups": []
             }
-            self.logger.info(f"添加新用户: {user_openid}")
+            if name:
+                user_data["username"] = name
+                user_data["username_history"] = [
+                    {"name": name, "first_seen": current_time, "last_active": current_time}
+                ]
+            self.users[user_openid] = user_data
+            self.logger.info(f"添加新用户: {user_openid} (username={name})")
         else:
             self.users[user_openid]["last_active"] = current_time
             if avatar:
                 self.users[user_openid]["avatar"] = avatar
-        
+            # 用户名历史维护
+            if name:
+                self._update_name_history(self.users[user_openid], name, current_time, "username")
+
         # 确保用户有展示ID - 新增
         self.get_user_display_id(user_openid)
-        
+
         self._save_data()
         return self.users[user_openid]
+
+    def _update_name_history(self, record: dict, new_name: str, now: float, name_key: str):
+        """通用历史更新: name_key='username' 或 'group_name'"""
+        history_key = f"{name_key}_history"
+        old_name = record.get(name_key)
+        if old_name == new_name:
+            # 名字没变, 刷新历史末尾条目的 last_active
+            history = record.get(history_key) or []
+            if history:
+                history[-1]["last_active"] = now
+            else:
+                record[history_key] = [{"name": new_name, "first_seen": now, "last_active": now}]
+            return
+        # 名字变了 (或首次): 更新当前名 + 追加历史
+        record[name_key] = new_name
+        history = record.setdefault(history_key, [])
+        history.append({"name": new_name, "first_seen": now, "last_active": now})
+
+    def get_username(self, user_openid: str) -> Optional[str]:
+        """获取用户当前用户名 (无则返回 None)"""
+        user = self.users.get(user_openid)
+        return user.get("username") if user else None
+
+    def get_username_history(self, user_openid: str) -> List[dict]:
+        """获取用户的用户名历史列表 (按时间正序)"""
+        user = self.users.get(user_openid)
+        if not user:
+            return []
+        return list(user.get("username_history") or [])
+
+    def get_groupname(self, group_openid: str) -> Optional[str]:
+        """获取群当前名称 (无则返回 None)"""
+        group = self.groups.get(group_openid)
+        return group.get("group_name") if group else None
+
+    def get_groupname_history(self, group_openid: str) -> List[dict]:
+        """获取群名历史列表"""
+        group = self.groups.get(group_openid)
+        if not group:
+            return []
+        return list(group.get("group_name_history") or [])
     
     def get_user(self, user_openid: str) -> Optional[dict]:
         """获取用户信息"""

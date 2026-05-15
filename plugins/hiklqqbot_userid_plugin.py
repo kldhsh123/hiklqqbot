@@ -15,10 +15,11 @@ class HiklqqbotUseridPlugin(BasePlugin):
     
     def __init__(self):
         super().__init__(
-            command="hiklqqbot_userid", 
-            description="获取您的唯一标识符", 
+            command="hiklqqbot_userid",
+            description="获取您的唯一标识符",
             is_builtin=True,
-            hidden=False
+            hidden=False,
+            display_name="我的ID"
         )
         self.logger = logging.getLogger("plugin.userid")
         

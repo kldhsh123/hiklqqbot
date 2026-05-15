@@ -14,6 +14,7 @@ class RollPlugin(BasePlugin):
             command="roll",
             description="掷骰子，支持 NdM 和修正值，例如 /roll d20 或 /roll 2d6+3",
             is_builtin=False,
+            display_name="掷骰",
         )
         self.logger = logging.getLogger("plugin.roll")
         self.default_count = 1

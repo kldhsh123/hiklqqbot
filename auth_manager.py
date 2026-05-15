@@ -14,8 +14,10 @@ class AuthManager:
         self.admins: Set[str] = set()
         self.maintenance_mode = False
         self.auth_file = "admins.json"  # 管理员ID存储文件
+        self.maintenance_file = "maintenance.json"  # 维护模式状态存储文件
         self.logger = logger
         self._load_admins()
+        self._load_maintenance()
     
     def _load_admins(self) -> None:
         """
@@ -105,12 +107,36 @@ class AuthManager:
     def set_maintenance_mode(self, enabled: bool) -> None:
         """
         设置维护模式
-        
+
         Args:
             enabled: 是否启用维护模式
         """
         self.maintenance_mode = enabled
+        self._save_maintenance()
         self.logger.info(f"维护模式已{'启用' if enabled else '禁用'}")
+
+    def _load_maintenance(self) -> None:
+        """从文件加载维护模式状态"""
+        try:
+            if os.path.exists(self.maintenance_file):
+                with open(self.maintenance_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.maintenance_mode = bool(data.get("maintenance_mode", False))
+                    self.logger.info(f"已加载维护模式状态: {self.maintenance_mode}")
+            else:
+                # 文件不存在时创建默认值
+                self._save_maintenance()
+        except Exception as e:
+            self.logger.error(f"加载维护模式状态失败: {e}")
+
+    def _save_maintenance(self) -> None:
+        """保存维护模式状态到文件"""
+        try:
+            with open(self.maintenance_file, 'w', encoding='utf-8') as f:
+                json.dump({"maintenance_mode": self.maintenance_mode}, f, indent=2, ensure_ascii=False)
+            self.logger.debug(f"已保存维护模式状态: {self.maintenance_mode}")
+        except Exception as e:
+            self.logger.error(f"保存维护模式状态失败: {e}")
     
     def is_maintenance_mode(self) -> bool:
         """
