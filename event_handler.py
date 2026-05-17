@@ -9,12 +9,16 @@ from auth_manager import auth_manager
 import traceback
 from typing import Optional, Dict, Any
 from stats_manager import stats_manager
+from message_archive import message_archive
 from enhanced_message_types import (
     EventType, EnhancedMessage, EventDataNormalizer,
     extract_user_id, extract_target_info, normalize_event
 )
 from blacklist_manager import blacklist_manager
-from config import ENABLE_BLACKLIST, BLACKLIST_SHOW_REASON, API_BASE_URL, HELP_BUTTON_ACTION_TYPE
+from config import (
+    ENABLE_BLACKLIST, BLACKLIST_SHOW_REASON, API_BASE_URL,
+    HELP_BUTTON_ACTION_TYPE, FULL_MESSAGE_MODE,
+)
 from reply import Reply
 from ui_builder import make_button_row, make_command_button, make_keyboard
 
@@ -38,6 +42,7 @@ class EventHandler:
             "AT_MESSAGE_CREATE": self.handle_at_message,
             "DIRECT_MESSAGE_CREATE": self.handle_direct_message,
             "C2C_MESSAGE_CREATE": self.handle_c2c_message,
+            "GROUP_MESSAGE_CREATE": self.handle_group_message,
             "GROUP_AT_MESSAGE_CREATE": self.handle_group_at_message,
             "READY": self.handle_ready,
             "RESUMED": self.handle_resumed,
@@ -99,7 +104,7 @@ class EventHandler:
     def _get_user_id(self, data):
         """从事件数据中提取用户ID (优先author.id，然后是openid)"""
         author = data.get("author", {})
-        user_id = author.get("id")
+        user_id = author.get("user_openid") or author.get("id")
         if not user_id:
             user_id = author.get("openid")
         if not user_id:
@@ -107,6 +112,21 @@ class EventHandler:
         if not user_id:
             user_id = data.get("openid")
         return user_id
+
+    def _get_executor_user_id(self, data: Dict[str, Any]) -> Optional[str]:
+        """提取当前执行命令/点击按钮的用户 ID，用于 markdown @。"""
+        interaction_data = data.get("data", {}) or {}
+        resolved = interaction_data.get("resolved", {}) or {}
+        return (
+            resolved.get("user_id")
+            or data.get("group_member_openid")
+            or data.get("user_openid")
+            or self._get_user_id(data)
+        )
+
+    def _is_full_group_message_event(self, event_type: Optional[str]) -> bool:
+        """判断是否为已授权群的全量消息事件。"""
+        return event_type == "GROUP_MESSAGE_CREATE"
 
     def _format_expire_time(self, expire_time_str: str) -> str:
         """格式化过期时间为更易读的格式"""
@@ -190,7 +210,6 @@ class EventHandler:
 
     def _build_help_shortcut_reply(self, title: str, body: str, user_id: Optional[str] = None) -> Reply:
         """构造带 /help 按钮的提示回复。"""
-        permission_user_ids = [user_id] if user_id else None
         keyboard = make_keyboard([
             make_button_row([
                 make_command_button(
@@ -198,7 +217,6 @@ class EventHandler:
                     "/help",
                     "/help",
                     action_type=HELP_BUTTON_ACTION_TYPE,
-                    permission_user_ids=permission_user_ids,
                     style=1,
                 )
             ])
@@ -238,18 +256,41 @@ class EventHandler:
     async def _run_plugin_and_reply(self, plugin, params: str, user_id: str, event_data: dict, invoked_command: str = None):
         """在后台运行插件并处理回复"""
         response = None
+        group_openid = event_data.get("group_openid")
+        event_type = event_data.get("type")
+        is_full_group_message = self._is_full_group_message_event(event_type)
         try:
-            group_openid = event_data.get("group_openid")
             response = await plugin.handle(
                 params, user_id,
                 group_openid=group_openid,
                 event_data=event_data,
                 invoked_command=invoked_command or plugin.command,
             )
+            stats_manager.log_command(plugin.command, user_id, group_openid)
+            if is_full_group_message:
+                message_archive.log_command_message(
+                    event_data,
+                    user_id=user_id,
+                    group_openid=group_openid,
+                    command=plugin.command,
+                    invoked_command=invoked_command or plugin.command,
+                    params=params,
+                )
         except Exception as e:
             self.logger.error(f"插件 {plugin.command} 处理命令时出错: {e}")
             self.logger.error(traceback.format_exc())
             response = f"处理命令 {plugin.command} 时出现内部错误。"
+            if is_full_group_message:
+                stats_manager.log_other_message(user_id, group_openid)
+                message_archive.log_other_message(
+                    event_data,
+                    user_id=user_id,
+                    group_openid=group_openid,
+                    reason="plugin_error",
+                    command=plugin.command,
+                    invoked_command=invoked_command or plugin.command,
+                    params=params,
+                )
 
         if not response:
             return
@@ -301,11 +342,9 @@ class EventHandler:
         await self.handle_direct_message(data)
         return True
 
-    async def handle_group_at_message(self, data):
-        """处理群聊@消息"""
-        self.logger.info(f"收到群聊@消息: {data}")
-        # 设置事件类型，确保黑名单检查能正确识别
-        data["type"] = "GROUP_AT_MESSAGE_CREATE"
+    async def _handle_group_message_common(self, data: Dict[str, Any], event_type: str):
+        """处理群聊消息（全量群消息或群聊@消息）的公共逻辑。"""
+        data["type"] = event_type
         content = data.get("content", "")
         user_id = self._get_user_id(data)
         username = (data.get("author") or {}).get("username")
@@ -325,6 +364,17 @@ class EventHandler:
         await self._process_command(content, data, user_id)
         return True
 
+    async def handle_group_message(self, data):
+        """处理已授权全量群消息。"""
+        self.logger.info(f"收到群聊消息: {data}")
+        return await self._handle_group_message_common(data, "GROUP_MESSAGE_CREATE")
+
+    async def handle_group_at_message(self, data):
+        """处理群聊@消息"""
+        self.logger.info(f"收到群聊@消息: {data}")
+        await self._handle_group_message_common(data, "GROUP_AT_MESSAGE_CREATE")
+        return True
+
     async def handle_ready(self, data):
         """处理准备就绪事件"""
         self.logger.info(f"机器人就绪: {data}")
@@ -337,16 +387,37 @@ class EventHandler:
 
     async def _process_command(self, content, data, user_id=None):
         """处理命令，找到插件或特殊命令（如/help）则创建后台任务执行"""
+        event_type = data.get("type")
+        group_openid = data.get("group_openid")
+        is_full_group_message = self._is_full_group_message_event(event_type)
+
+        def log_other_message_if_needed(reason: str, command: str = None, params_text: str = ""):
+            if not is_full_group_message:
+                return
+            stats_manager.log_other_message(user_id, group_openid)
+            message_archive.log_other_message(
+                data,
+                user_id=user_id,
+                group_openid=group_openid,
+                reason=reason,
+                command=command,
+                invoked_command=command,
+                params=params_text,
+            )
+
         # 检查黑名单
         is_blocked, block_reason = self._check_blacklist(data)
         if is_blocked:
             self.logger.info(f"黑名单检查: 被阻止, 原因='{block_reason}', SHOW_REASON={BLACKLIST_SHOW_REASON}")
+            log_other_message_if_needed("blacklisted")
 
             # 可选择性地向用户发送封禁原因（仅在私聊或@消息时）
-            event_type = data.get("type")
             self.logger.info(f"事件类型: {event_type}")
 
-            if event_type in ["DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE", "AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"]:
+            if event_type in [
+                "DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE",
+                "AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE", "GROUP_MESSAGE_CREATE",
+            ]:
                 self.logger.info(f"事件类型匹配，检查发送条件: block_reason={bool(block_reason)}, BLACKLIST_SHOW_REASON={BLACKLIST_SHOW_REASON}")
 
                 if block_reason and BLACKLIST_SHOW_REASON:
@@ -373,17 +444,19 @@ class EventHandler:
             return False  # 被黑名单阻止，不处理
 
         clean_content = re.sub(r'<@!\d+>', '', content).strip()
-        event_type = data.get("type")
         is_at_message = event_type in ["AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"]
         is_direct_message = event_type in ["DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE"]
+        suppress_invalid_feedback = FULL_MESSAGE_MODE and is_full_group_message
 
         # 如果不是@消息、私聊消息，且内容不以/开头，则忽略 (避免处理普通群聊消息)
         if not is_at_message and not is_direct_message and not clean_content.startswith('/'):
              self.logger.debug(f"忽略非 / 开头的普通群/频道消息: {clean_content[:50]}...")
+             log_other_message_if_needed("non_command_message")
              return False # 表明未处理
 
         # 处理空内容的情况
         if not clean_content:
+            log_other_message_if_needed("empty_message")
             # 只在 @消息 或 私聊 时回复提示
             if is_at_message or is_direct_message:
                 response = self._build_help_shortcut_reply(
@@ -405,6 +478,7 @@ class EventHandler:
 
         # 检查维护模式
         if auth_manager.is_maintenance_mode() and not auth_manager.is_admin(user_id):
+            log_other_message_if_needed("maintenance_blocked")
             response = "机器人当前处于维护模式，仅管理员可用"
             message_id = data.get("id")
             target_id, is_group = self._get_channel_id(data)
@@ -429,8 +503,10 @@ class EventHandler:
         # 检查命令前缀和私聊的特殊处理
         if ENFORCE_COMMAND_PREFIX and not command.startswith('/') and not is_direct_message and not is_at_message:
              self.logger.debug(f"忽略非 / 开头的普通群/频道消息 (强制前缀): {command}")
+             log_other_message_if_needed("non_prefixed_message", command=command, params_text=params)
              return False # 不处理普通消息
         elif is_direct_message and not command.startswith('/'):
+             log_other_message_if_needed("missing_prefix", command=command, params_text=params)
              response = self._build_help_shortcut_reply(
                  "命令必须以 / 开头",
                  "请在命令前加上 `/`，或点击下方按钮查看可用命令。",
@@ -461,11 +537,6 @@ class EventHandler:
         
         response_to_send = None # 用于存储需要直接发送的响应 (help 或 not found)
         
-        # 记录命令使用统计
-        if plugin:
-            group_openid = data.get("group_openid")
-            stats_manager.log_command(plugin.command, user_id, group_openid)
-            
         if plugin:
             # 找到插件，启动后台任务处理 (传入实际触发的命令名, 便于多命令插件分辨)
             self.logger.info(f"为命令 '{command}' 找到插件 '{plugin.__class__.__name__}'，创建后台处理任务")
@@ -475,6 +546,15 @@ class EventHandler:
             # 特殊处理 /help 命令 - 使用富回复 (markdown + 按钮)
             self.logger.info(f"处理内置 /help 命令, 参数='{params}'")
             stats_manager.log_command("help", user_id, data.get("group_openid"))
+            if is_full_group_message:
+                message_archive.log_command_message(
+                    data,
+                    user_id=user_id,
+                    group_openid=group_openid,
+                    command="help",
+                    invoked_command=command,
+                    params=params,
+                )
             # 解析参数: "管理 2" → path="管理", page=2
             help_path = ""
             help_page = 1
@@ -513,6 +593,9 @@ class EventHandler:
         else:
             # 未找到插件，也不是 /help
             self.logger.warning(f"未找到命令 '{command}'")
+            log_other_message_if_needed("unknown_command", command=command, params_text=params)
+            if suppress_invalid_feedback:
+                return False
             response_to_send = self._build_help_shortcut_reply(
                 "未找到命令",
                 f"无法识别 `{command}`。\n\n点击下方按钮查看可用命令。",
@@ -611,7 +694,12 @@ class EventHandler:
 
         # 构造 payload
         ws_event_id = event_data.get("_ws_event_id") if (not message_id and msg_seq == 1) else None
-        payload = reply.to_payload(message_id=message_id, event_id=ws_event_id, msg_seq=msg_seq)
+        payload = reply.to_payload(
+            message_id=message_id,
+            event_id=ws_event_id,
+            msg_seq=msg_seq,
+            mention_user_id=self._get_executor_user_id(event_data),
+        )
 
         try:
             headers = _auth.get_auth_header(use_bot_token=True)
@@ -920,7 +1008,7 @@ class EventHandler:
                     # 按钮回调没有 message_id, 走 event_id; 多条时 event_id 只能用一次
                     # 后续条目使用主动消息(放弃 event_id 绑定)
                     use_event_id = ws_event_id if idx == 0 else None
-                    payload = item.to_payload(event_id=use_event_id)
+                    payload = item.to_payload(event_id=use_event_id, mention_user_id=clicker_user_id)
                     self.logger.info(f"按钮回调富回复 #{idx+1}: POST {api_url} msg_type={payload.get('msg_type')}")
                     resp = await asyncio.to_thread(requests.post, api_url, json=payload, headers=headers)
                     self.logger.info(f"响应 {resp.status_code}: {resp.text[:300]}")

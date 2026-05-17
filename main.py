@@ -21,14 +21,20 @@ except ImportError as e:
 
 # 使用配置文件初始化日志
 if os.path.exists('logging.ini'):
-    logging.config.fileConfig('logging.ini')
+    logging.config.fileConfig('logging.ini', disable_existing_loggers=False)
     logging.info("已从logging.ini加载日志配置")
 else:
     # 如果配置文件不存在，使用默认配置
+    from log_handler import SmartRotatingFileHandler
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[
+            logging.StreamHandler(),
+            SmartRotatingFileHandler('qqbot.log', encoding='utf-8'),
+        ],
     )
     logging.warning("logging.ini文件不存在，使用默认日志配置")
 

@@ -6,7 +6,7 @@
 - keyboard 可与 markdown 组合(QQ API 支持), 但与 text/media 单独发时会被忽略
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
 
@@ -20,9 +20,23 @@ class Reply:
     def is_empty(self) -> bool:
         return not (self.text or self.markdown or self.media_file_info)
 
+    def render_markdown(self, mention_user_id: Optional[str] = None) -> str:
+        """渲染 markdown 内容，可选在开头 @ 执行命令的人。"""
+        markdown = self.markdown or ""
+        if not mention_user_id:
+            return markdown
+
+        stripped = markdown.lstrip()
+        if stripped.startswith("<qqbot-at-user "):
+            return markdown
+
+        mention = f'<qqbot-at-user id="{mention_user_id}" />'
+        return f"{mention}\n\n{markdown}" if markdown else mention
+
     def to_payload(self, *, message_id: Optional[str] = None,
                    event_id: Optional[str] = None,
-                   msg_seq: int = 1) -> Dict[str, Any]:
+                   msg_seq: int = 1,
+                   mention_user_id: Optional[str] = None) -> Dict[str, Any]:
         """渲染为 QQ V2 群/单聊 messages 接口请求体。"""
         # 1) 富媒体优先 (msg_type=7)
         if self.media_file_info:
@@ -33,10 +47,11 @@ class Reply:
             }
         # 2) markdown (msg_type=2)
         elif self.markdown:
+            markdown = self.render_markdown(mention_user_id)
             data = {
                 "msg_type": 2,
                 "content": " ",
-                "markdown": {"content": self.markdown},
+                "markdown": {"content": markdown},
             }
             if self.keyboard:
                 data["keyboard"] = self.keyboard

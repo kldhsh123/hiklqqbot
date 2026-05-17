@@ -36,9 +36,13 @@ env/
 
 # 日志
 *.log 
+logs/*.log.*
+logs/command_messages/*.jsonl
+logs/other_messages/*.jsonl
 /.claude
 admins.json
 blacklist.json
 /data
 maintenance.json
 menu_config.json
+menu_intro.json

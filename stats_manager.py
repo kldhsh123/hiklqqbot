@@ -38,12 +38,7 @@ class StatsManager:
         # 数据结构
         self.groups = {}  # {group_id: {"join_time": time, "members": [user_ids], ...}}
         self.users = {}   # {user_id: {"first_seen": time, ...}}
-        self.usage_stats = {
-            "commands": {},  # {command_name: count}
-            "groups": {},    # {group_id: message_count}
-            "users": {},     # {user_id: message_count}
-            "total_messages": 0
-        }
+        self.usage_stats = self._create_usage_stats()
         
         # ID映射结构 - 新增
         self.id_mappings = {
@@ -53,9 +48,9 @@ class StatsManager:
         
         # 时间段统计结构 - 新增
         self.time_stats = {
-            "daily": {},   # {date_str: {commands: {}, groups: {}, users: {}, total: 0}}
-            "weekly": {},  # {week_str: {commands: {}, groups: {}, users: {}, total: 0}}
-            "monthly": {}  # {month_str: {commands: {}, groups: {}, users: {}, total: 0}}
+            "daily": {},   # {date_str: bucket}
+            "weekly": {},  # {week_str: bucket}
+            "monthly": {}  # {month_str: bucket}
         }
         
         # 加载数据
@@ -65,6 +60,111 @@ class StatsManager:
         self.cleanup_time_stats()
         
         self.initialized = True
+
+    def _create_usage_stats(self) -> Dict:
+        return {
+            "commands": {},          # {command_name: count}
+            "groups": {},            # {group_id: overall_message_count}
+            "users": {},             # {user_id: overall_message_count}
+            "total_messages": 0,
+            "command_messages": 0,   # 成功进入命令处理流程的消息数
+            "other_messages": 0,     # 其他消息数（聊天/普通文本/未知命令等）
+            "command_groups": {},    # {group_id: command_message_count}
+            "command_users": {},     # {user_id: command_message_count}
+            "other_groups": {},      # {group_id: other_message_count}
+            "other_users": {},       # {user_id: other_message_count}
+        }
+
+    def _create_time_bucket(self) -> Dict:
+        return {
+            "commands": {},
+            "groups": {},
+            "users": {},
+            "total": 0,
+            "command_messages": 0,
+            "other_messages": 0,
+            "command_groups": {},
+            "command_users": {},
+            "other_groups": {},
+            "other_users": {},
+        }
+
+    def _merge_counter_dict(self, target: Dict, source: Dict):
+        if not isinstance(source, dict):
+            return
+        for key, value in source.items():
+            try:
+                target[str(key)] = int(value)
+            except (TypeError, ValueError):
+                continue
+
+    def _normalize_usage_stats(self, raw_stats: Optional[Dict]) -> Dict:
+        normalized = self._create_usage_stats()
+        if not isinstance(raw_stats, dict):
+            return normalized
+
+        for key in ("commands", "groups", "users", "command_groups", "command_users", "other_groups", "other_users"):
+            self._merge_counter_dict(normalized[key], raw_stats.get(key, {}))
+
+        for key in ("total_messages", "command_messages", "other_messages"):
+            try:
+                normalized[key] = int(raw_stats.get(key, normalized[key]))
+            except (TypeError, ValueError):
+                pass
+
+        # 兼容旧数据：没有分类型字段时，用已有 total_messages 作为 command_messages
+        if normalized["command_messages"] == 0 and normalized["other_messages"] == 0:
+            normalized["command_messages"] = normalized["total_messages"]
+            normalized["command_groups"] = dict(normalized["groups"])
+            normalized["command_users"] = dict(normalized["users"])
+
+        normalized["total_messages"] = normalized["command_messages"] + normalized["other_messages"]
+        return normalized
+
+    def _normalize_time_bucket(self, raw_bucket: Optional[Dict]) -> Dict:
+        normalized = self._create_time_bucket()
+        if not isinstance(raw_bucket, dict):
+            return normalized
+
+        for key in ("commands", "groups", "users", "command_groups", "command_users", "other_groups", "other_users"):
+            self._merge_counter_dict(normalized[key], raw_bucket.get(key, {}))
+
+        for key in ("total", "command_messages", "other_messages"):
+            try:
+                normalized[key] = int(raw_bucket.get(key, normalized[key]))
+            except (TypeError, ValueError):
+                pass
+
+        if normalized["command_messages"] == 0 and normalized["other_messages"] == 0:
+            normalized["command_messages"] = normalized["total"]
+            normalized["command_groups"] = dict(normalized["groups"])
+            normalized["command_users"] = dict(normalized["users"])
+
+        normalized["total"] = normalized["command_messages"] + normalized["other_messages"]
+        return normalized
+
+    def _normalize_time_stats(self, raw_stats: Optional[Dict]) -> Dict:
+        normalized = {
+            "daily": {},
+            "weekly": {},
+            "monthly": {},
+        }
+        if not isinstance(raw_stats, dict):
+            return normalized
+
+        for time_type in ("daily", "weekly", "monthly"):
+            buckets = raw_stats.get(time_type, {})
+            if not isinstance(buckets, dict):
+                continue
+            for time_key, bucket in buckets.items():
+                normalized[time_type][str(time_key)] = self._normalize_time_bucket(bucket)
+
+        return normalized
+
+    def _increment_counter(self, container: Dict[str, int], key: Optional[str]):
+        if not key:
+            return
+        container[key] = int(container.get(key, 0)) + 1
         
     def _load_data(self):
         """从文件加载数据"""
@@ -79,7 +179,7 @@ class StatsManager:
                     
             if os.path.exists(self.stats_file):
                 with open(self.stats_file, "r", encoding="utf-8") as f:
-                    self.usage_stats = json.load(f)
+                    self.usage_stats = self._normalize_usage_stats(json.load(f))
             
             # 加载ID映射 - 新增
             if os.path.exists(self.id_mappings_file):
@@ -89,7 +189,7 @@ class StatsManager:
             # 加载时间段统计 - 新增
             if os.path.exists(self.time_stats_file):
                 with open(self.time_stats_file, "r", encoding="utf-8") as f:
-                    self.time_stats = json.load(f)
+                    self.time_stats = self._normalize_time_stats(json.load(f))
         except Exception as e:
             self.logger.error(f"加载统计数据失败: {e}")
     
@@ -217,12 +317,7 @@ class StatsManager:
     def _ensure_time_stats_structure(self, time_key: str, time_type: str):
         """确保时间段统计结构存在"""
         if time_key not in self.time_stats[time_type]:
-            self.time_stats[time_type][time_key] = {
-                "commands": {},
-                "groups": {},
-                "users": {},
-                "total": 0
-            }
+            self.time_stats[time_type][time_key] = self._create_time_bucket()
     
     # 群组相关方法
     def add_group(self, group_openid: str, name: str = None, op_member_openid: str = None):
@@ -423,90 +518,64 @@ class StatsManager:
         return False
     
     # 统计相关方法
-    def log_command(self, command: str, user_openid: str = None, group_openid: str = None):
-        """记录命令使用"""
+    def log_message(self, message_type: str, user_openid: str = None,
+                    group_openid: str = None, command: str = None):
+        """记录消息统计。
+
+        Args:
+            message_type: command 或 other
+            user_openid: 用户ID
+            group_openid: 群ID
+            command: 成功命令名，仅在 message_type=command 时使用
+        """
+        if message_type not in ("command", "other"):
+            self.logger.warning(f"未知消息类型: {message_type}")
+            return
+
         current_time = time.time()
-        
-        # 更新命令计数
-        if command not in self.usage_stats["commands"]:
-            self.usage_stats["commands"][command] = 0
-        self.usage_stats["commands"][command] += 1
-        
-        # 更新用户和群组活跃度
-        if user_openid:
-            if user_openid not in self.usage_stats["users"]:
-                self.usage_stats["users"][user_openid] = 0
-            self.usage_stats["users"][user_openid] += 1
-            
-        if group_openid:
-            if group_openid not in self.usage_stats["groups"]:
-                self.usage_stats["groups"][group_openid] = 0
-            self.usage_stats["groups"][group_openid] += 1
-        
+
+        if message_type == "command" and command:
+            self._increment_counter(self.usage_stats["commands"], command)
+
+        self._increment_counter(self.usage_stats["users"], user_openid)
+        self._increment_counter(self.usage_stats["groups"], group_openid)
         self.usage_stats["total_messages"] += 1
-        
-        # 更新时间段统计 - 新增
+
+        if message_type == "command":
+            self.usage_stats["command_messages"] += 1
+            self._increment_counter(self.usage_stats["command_users"], user_openid)
+            self._increment_counter(self.usage_stats["command_groups"], group_openid)
+        else:
+            self.usage_stats["other_messages"] += 1
+            self._increment_counter(self.usage_stats["other_users"], user_openid)
+            self._increment_counter(self.usage_stats["other_groups"], group_openid)
+
         daily_key, weekly_key, monthly_key = self._get_time_keys(current_time)
-        
-        # 更新日统计
+
         self._ensure_time_stats_structure(daily_key, "daily")
-        daily_stats = self.time_stats["daily"][daily_key]
-        
-        if command not in daily_stats["commands"]:
-            daily_stats["commands"][command] = 0
-        daily_stats["commands"][command] += 1
-        
-        if user_openid:
-            if user_openid not in daily_stats["users"]:
-                daily_stats["users"][user_openid] = 0
-            daily_stats["users"][user_openid] += 1
-        
-        if group_openid:
-            if group_openid not in daily_stats["groups"]:
-                daily_stats["groups"][group_openid] = 0
-            daily_stats["groups"][group_openid] += 1
-        
-        daily_stats["total"] += 1
-        
-        # 更新周统计
         self._ensure_time_stats_structure(weekly_key, "weekly")
-        weekly_stats = self.time_stats["weekly"][weekly_key]
-        
-        if command not in weekly_stats["commands"]:
-            weekly_stats["commands"][command] = 0
-        weekly_stats["commands"][command] += 1
-        
-        if user_openid:
-            if user_openid not in weekly_stats["users"]:
-                weekly_stats["users"][user_openid] = 0
-            weekly_stats["users"][user_openid] += 1
-        
-        if group_openid:
-            if group_openid not in weekly_stats["groups"]:
-                weekly_stats["groups"][group_openid] = 0
-            weekly_stats["groups"][group_openid] += 1
-        
-        weekly_stats["total"] += 1
-        
-        # 更新月统计
         self._ensure_time_stats_structure(monthly_key, "monthly")
-        monthly_stats = self.time_stats["monthly"][monthly_key]
-        
-        if command not in monthly_stats["commands"]:
-            monthly_stats["commands"][command] = 0
-        monthly_stats["commands"][command] += 1
-        
-        if user_openid:
-            if user_openid not in monthly_stats["users"]:
-                monthly_stats["users"][user_openid] = 0
-            monthly_stats["users"][user_openid] += 1
-        
-        if group_openid:
-            if group_openid not in monthly_stats["groups"]:
-                monthly_stats["groups"][group_openid] = 0
-            monthly_stats["groups"][group_openid] += 1
-        
-        monthly_stats["total"] += 1
+
+        for stats in (
+            self.time_stats["daily"][daily_key],
+            self.time_stats["weekly"][weekly_key],
+            self.time_stats["monthly"][monthly_key],
+        ):
+            if message_type == "command" and command:
+                self._increment_counter(stats["commands"], command)
+
+            self._increment_counter(stats["users"], user_openid)
+            self._increment_counter(stats["groups"], group_openid)
+            stats["total"] += 1
+
+            if message_type == "command":
+                stats["command_messages"] += 1
+                self._increment_counter(stats["command_users"], user_openid)
+                self._increment_counter(stats["command_groups"], group_openid)
+            else:
+                stats["other_messages"] += 1
+                self._increment_counter(stats["other_users"], user_openid)
+                self._increment_counter(stats["other_groups"], group_openid)
         
         # 检查并清理过期的月统计数据
         # 当添加新的月份数据时，触发清理
@@ -514,6 +583,14 @@ class StatsManager:
             self.cleanup_time_stats()
         
         self._save_data()
+
+    def log_command(self, command: str, user_openid: str = None, group_openid: str = None):
+        """记录成功命令消息。"""
+        self.log_message("command", user_openid=user_openid, group_openid=group_openid, command=command)
+
+    def log_other_message(self, user_openid: str = None, group_openid: str = None):
+        """记录其他消息（聊天/普通文本/未知命令等）。"""
+        self.log_message("other", user_openid=user_openid, group_openid=group_openid)
     
     def get_command_stats(self) -> Dict[str, int]:
         """获取命令使用统计"""
@@ -535,36 +612,21 @@ class StatsManager:
         if date_str is None:
             date_str, _, _ = self._get_time_keys()
         
-        return self.time_stats["daily"].get(date_str, {
-            "commands": {},
-            "groups": {},
-            "users": {},
-            "total": 0
-        })
+        return self.time_stats["daily"].get(date_str, self._create_time_bucket())
     
     def get_weekly_stats(self, week_str: Optional[str] = None) -> dict:
         """获取指定周的统计数据，默认为本周"""
         if week_str is None:
             _, week_str, _ = self._get_time_keys()
         
-        return self.time_stats["weekly"].get(week_str, {
-            "commands": {},
-            "groups": {},
-            "users": {},
-            "total": 0
-        })
+        return self.time_stats["weekly"].get(week_str, self._create_time_bucket())
     
     def get_monthly_stats(self, month_str: Optional[str] = None) -> dict:
         """获取指定月的统计数据，默认为本月"""
         if month_str is None:
             _, _, month_str = self._get_time_keys()
         
-        return self.time_stats["monthly"].get(month_str, {
-            "commands": {},
-            "groups": {},
-            "users": {},
-            "total": 0
-        })
+        return self.time_stats["monthly"].get(month_str, self._create_time_bucket())
     
     # 事件响应方法
     def handle_group_add_robot(self, group_openid: str, op_member_openid: str, timestamp: int):

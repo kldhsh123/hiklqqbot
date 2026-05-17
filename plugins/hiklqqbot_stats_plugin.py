@@ -207,6 +207,8 @@ class HiklqqbotStatsPlugin(BasePlugin):
             
             # 总体统计
             result += f"总消息数: {usage_stats.get('total_messages', 0)}\n"
+            result += f"成功命令消息: {usage_stats.get('command_messages', 0)}\n"
+            result += f"其他消息: {usage_stats.get('other_messages', 0)}\n"
             result += f"总命令数: {sum(command_stats.values())}\n"
             result += f"记录群组数: {len(stats_manager.get_all_groups())}\n"
             result += f"记录用户数: {len(stats_manager.get_all_users())}\n\n"
@@ -356,7 +358,9 @@ class HiklqqbotStatsPlugin(BasePlugin):
             result = f"日统计数据 ({date_display}):\n\n"
             
             # 总体统计
-            result += f"总消息数: {daily_stats['total']}\n\n"
+            result += f"总消息数: {daily_stats['total']}\n"
+            result += f"成功命令消息: {daily_stats.get('command_messages', 0)}\n"
+            result += f"其他消息: {daily_stats.get('other_messages', 0)}\n\n"
             
             # 命令统计
             command_stats = daily_stats.get("commands", {})
@@ -423,7 +427,9 @@ class HiklqqbotStatsPlugin(BasePlugin):
             result = f"周统计数据 ({week_display}):\n\n"
             
             # 总体统计
-            result += f"总消息数: {weekly_stats['total']}\n\n"
+            result += f"总消息数: {weekly_stats['total']}\n"
+            result += f"成功命令消息: {weekly_stats.get('command_messages', 0)}\n"
+            result += f"其他消息: {weekly_stats.get('other_messages', 0)}\n\n"
             
             # 命令统计
             command_stats = weekly_stats.get("commands", {})
@@ -493,7 +499,9 @@ class HiklqqbotStatsPlugin(BasePlugin):
             result = f"月统计数据 ({month_display}):\n\n"
             
             # 总体统计
-            result += f"总消息数: {monthly_stats['total']}\n\n"
+            result += f"总消息数: {monthly_stats['total']}\n"
+            result += f"成功命令消息: {monthly_stats.get('command_messages', 0)}\n"
+            result += f"其他消息: {monthly_stats.get('other_messages', 0)}\n\n"
             
             # 命令统计
             command_stats = monthly_stats.get("commands", {})
