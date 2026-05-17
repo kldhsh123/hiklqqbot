@@ -301,6 +301,26 @@ class EventHandler:
             self.logger.error(f"发送回复时出错: {e}")
             self.logger.error(traceback.format_exc())
 
+    def _strip_leading_mentions(self, content: str) -> tuple[str, bool]:
+        """剥离消息开头的 @ 机器人片段，兼容全量群消息。"""
+        clean_content = content or ""
+        mentioned = False
+        patterns = (
+            r"^\s*<@![^>]+>\s*",
+            r"^\s*<qqbot-at-user\b[^>]*\/?>\s*",
+            r"^\s*@([^\s/]+)\s*",
+        )
+
+        while True:
+            original = clean_content
+            for pattern in patterns:
+                clean_content = re.sub(pattern, "", clean_content, count=1)
+            if clean_content == original:
+                break
+            mentioned = True
+
+        return clean_content.strip(), mentioned
+
     async def handle_at_message(self, data):
         """处理频道@消息"""
         self.logger.info(f"收到@消息: {data}")
@@ -311,9 +331,6 @@ class EventHandler:
         username = (data.get("author") or {}).get("username")
         if user_id:
             stats_manager.add_user(user_id, name=username)
-
-        clean_content = re.sub(r'<@!\d+>', '', content).strip()
-        clean_content = re.sub(r'@[\w\u4e00-\u9fa5]+\s*', '', clean_content).strip()
 
         await self._process_command(content, data, user_id)
         return True
@@ -357,9 +374,6 @@ class EventHandler:
             stats_manager.add_group(group_openid)
             if user_id:
                 stats_manager.add_user_to_group(group_openid, user_id)
-        
-        clean_content = re.sub(r'<@!\d+>', '', content).strip()
-        clean_content = re.sub(r'@[\w\u4e00-\u9fa5]+\s*', '', clean_content).strip()
 
         await self._process_command(content, data, user_id)
         return True
@@ -443,8 +457,10 @@ class EventHandler:
 
             return False  # 被黑名单阻止，不处理
 
-        clean_content = re.sub(r'<@!\d+>', '', content).strip()
-        is_at_message = event_type in ["AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"]
+        clean_content, has_leading_mention = self._strip_leading_mentions(content)
+        is_at_message = event_type in ["AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"] or (
+            is_full_group_message and has_leading_mention
+        )
         is_direct_message = event_type in ["DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE"]
         suppress_invalid_feedback = FULL_MESSAGE_MODE and is_full_group_message
 
@@ -749,13 +765,8 @@ class EventHandler:
         if not group_openid:
             self.logger.error("缺少群组ID")
             return False
-        
-        group = stats_manager.get_group(group_openid)
-        if group:
-            group["can_send_proactive_msg"] = False
-            stats_manager._save_data()
-            return True
-        return False
+
+        return stats_manager.set_group_proactive_message_permission(group_openid, False)
     
     async def handle_group_msg_receive(self, event_data: Dict[str, Any]) -> bool:
         """处理群聊接受机器人主动消息事件"""
@@ -765,13 +776,8 @@ class EventHandler:
         if not group_openid:
             self.logger.error("缺少群组ID")
             return False
-        
-        group = stats_manager.get_group(group_openid)
-        if group:
-            group["can_send_proactive_msg"] = True
-            stats_manager._save_data()
-            return True
-        return False
+
+        return stats_manager.set_group_proactive_message_permission(group_openid, True)
     
     async def handle_friend_add(self, event_data: Dict[str, Any]) -> bool:
         """处理用户添加机器人事件"""
@@ -807,13 +813,8 @@ class EventHandler:
         if not user_openid:
             self.logger.error("缺少用户ID")
             return False
-        
-        user = stats_manager.get_user(user_openid)
-        if user:
-            user["can_send_proactive_msg"] = False
-            stats_manager._save_data()
-            return True
-        return False
+
+        return stats_manager.set_user_proactive_message_permission(user_openid, False)
     
     async def handle_c2c_msg_receive(self, event_data: Dict[str, Any]) -> bool:
         """处理接受机器人主动消息事件"""
@@ -824,12 +825,7 @@ class EventHandler:
             self.logger.error("缺少用户ID")
             return False
 
-        user = stats_manager.get_user(user_openid)
-        if user:
-            user["can_send_proactive_msg"] = True
-            stats_manager._save_data()
-            return True
-        return False
+        return stats_manager.set_user_proactive_message_permission(user_openid, True)
 
     # 频道/扩展事件处理方法
     async def handle_message_create(self, event_data: Dict[str, Any]) -> bool:

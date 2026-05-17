@@ -3,10 +3,6 @@ import asyncio
 import logging
 import logging.config
 from config import BOT_APPID, BOT_APPSECRET, BOT_TOKEN, COMM_MODE
-from websocket_client import ws_client
-from webhook_server import webhook_server
-from plugins.plugin_manager import plugin_manager
-from stats_manager import stats_manager
 
 # 确保彩色日志格式化器模块可用
 try:
@@ -39,6 +35,13 @@ else:
     logging.warning("logging.ini文件不存在，使用默认日志配置")
 
 logger = logging.getLogger("main")
+
+# 在日志初始化完成后再导入会触发全局实例化的模块，
+# 避免迁移日志在 logging 配置前丢失。
+from websocket_client import ws_client
+from webhook_server import webhook_server
+from plugins.plugin_manager import plugin_manager
+from stats_manager import stats_manager
 
 def check_env():
     """检查环境变量是否已配置"""

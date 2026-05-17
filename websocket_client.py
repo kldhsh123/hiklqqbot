@@ -8,8 +8,6 @@ from config import BOT_APPID, BOT_TOKEN
 from event_handler import event_handler
 from auth import auth_manager  # 保留auth_manager用于获取动态token
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("websocket_client")
 
 class WebSocketClient:

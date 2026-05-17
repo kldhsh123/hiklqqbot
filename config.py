@@ -15,6 +15,9 @@ COMM_MODE = os.getenv("COMM_MODE", "websocket")
 # 全量消息模式配置
 FULL_MESSAGE_MODE = os.getenv("FULL_MESSAGE_MODE", "false").lower() == "true"
 
+# 框架内部数据存储（sqlite3）
+FRAMEWORK_DB_PATH = os.getenv("FRAMEWORK_DB_PATH", "data/framework.db")
+
 # Webhook相关配置 (仅COMM_MODE="webhook"时使用)
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
 WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", 8080))
