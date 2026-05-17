@@ -313,6 +313,8 @@ class MyPlugin(BasePlugin):
 | `keyboard` | dict | 完整 keyboard payload，仅在 markdown 下显示 |
 | `media_file_info` | str | 富媒体 file_info（设置时 `msg_type=7`，覆盖前两者） |
 
+框架发送 markdown 时会默认在开头补一个 `@执行命令的人`；如果你的 markdown 已经以 `<qqbot-at-user ... />` 开头，则不会重复追加。
+
 ### Markdown 与按钮速查
 
 大多数插件交互界面都可以归结为一件事：返回 `Reply(markdown=..., keyboard=...)`。建议按下面的顺序写：
@@ -1217,17 +1219,18 @@ async def handle(self, params, user_id=None, group_openid=None, **kwargs):
 
 ## 2. menu_config.json 自定义菜单
 
-项目根目录 `menu_config.json` 完全自定义 `/help` 菜单的 markdown 模板和排版：
+项目根目录 `menu_config.json` 完全自定义 `/help` 菜单的 markdown 模板和排版。
+介绍文案单独放在 `menu_intro.json`，再通过模板变量插入到菜单里：
 
 ```json
 {
   "root": {
-    "header_md": "# 📖 帮助菜单\n\n欢迎使用本机器人, 请选择一个分类查看可用命令：\n",
+    "header_md": "# 📖 帮助菜单\n\n{intro_block}",
     "footer_md": "\n> 点击上方文字进入对应分类",
     "show_buttons": true
   },
   "non_admin_category": {
-    "header_md": "# 帮助 - {breadcrumb}\n",
+    "header_md": "# 帮助 - {breadcrumb}\n\n{intro_block}",
     "before_commands_md": "## 命令 ({page}/{total_pages} 页, 共 {count} 个)\n",
     "footer_md": "\n> 发送 `/help` 返回主菜单",
     "columns": 3,
@@ -1238,7 +1241,7 @@ async def handle(self, params, user_id=None, group_openid=None, **kwargs):
     "show_home_button": true
   },
   "admin_category": {
-    "header_md": "# 🔧 帮助 - 管理\n\n共 {count} 个命令，点击按钮执行：\n",
+    "header_md": "# 🔧 帮助 - 管理\n\n{intro_block}共 {count} 个命令，点击按钮执行：\n",
     "continuation_header_md": "# 🔧 帮助 - 管理 (续 {page})",
     "buttons_per_row": 3,
     "rows_per_msg_first": 4,
@@ -1248,6 +1251,25 @@ async def handle(self, params, user_id=None, group_openid=None, **kwargs):
 }
 ```
 
+`menu_intro.json` 示例：
+
+```json
+{
+  "root": "欢迎使用本机器人, 请选择一个分类查看可用命令：",
+  "categories": {
+    "管理": "这里是管理员命令入口。按钮对所有人可点，但实际执行仍会校验管理员权限。",
+    "工具/媒体": "这里放的是图片、音频、文件等相关命令。"
+  }
+}
+```
+
+补充说明：
+
+- 如果项目根目录没有 `menu_intro.json`，框架会在第一次渲染 `/help` 时自动生成默认文件
+- `categories` 的 key 支持**子菜单完整路径**，例如 `工具/媒体`、`工具/媒体/图片`
+- 查找介绍文案时会优先匹配最具体的路径；如果当前子菜单没写，会自动回退到最近的父级路径
+- 例如进入 `工具/媒体/图片` 时，会按 `工具/媒体/图片` → `工具/媒体` → `工具` 的顺序查找介绍
+
 **所有 `*_md` 字段都是用户可写的 markdown 模板**，支持以下占位符：
 
 | 占位符 | 含义 |
@@ -1256,6 +1278,8 @@ async def handle(self, params, user_id=None, group_openid=None, **kwargs):
 | `{count}` | 命令总数 |
 | `{page}` | 当前页码 |
 | `{total_pages}` | 总页数 |
+| `{intro}` | 当前菜单对应的介绍文案 |
+| `{intro_block}` | 仅在有介绍文案时输出的段落块（已自动补好空行和 `***` 分隔线） |
 
 未识别的占位符原样保留。
 
@@ -1264,6 +1288,7 @@ async def handle(self, params, user_id=None, group_openid=None, **kwargs):
 - 顶级 `root`：固定渲染分类列表（每个分类一行 + 点击文字），开头/结尾的 markdown 由 `header_md` / `footer_md` 自定义
 - `non_admin_category`：默认 3 列网格 + 中间竖线 + 行分隔符，单命令行不加竖线
 - `admin_category`：**完全用按钮渲染**（每命令一个按钮），塞不下自动分多条消息
+- 帮助菜单按钮默认所有人都可点击，不再限制为“发送 `/help` 的那个人”
 
 ## 3. 统计与用户名 API
 

@@ -242,24 +242,19 @@ class BasePlugin(ABC):
         *,
         keyboard: Optional[Dict[str, Any]] = None,
         is_group: bool = False,
+        mention_user_id: Optional[str] = None,
         message_id: Optional[str] = None,
         event_id: Optional[str] = None,
         msg_seq: int = 1,
     ) -> Dict[str, Any]:
         """发送 markdown 消息, 可选附加按钮。"""
-        data: Dict[str, Any] = {
-            "msg_type": 2,
-            "content": " ",
-            "markdown": {"content": md_content},
-        }
-        if keyboard:
-            data["keyboard"] = keyboard
-        if message_id:
-            data["msg_id"] = message_id
-            data["msg_seq"] = msg_seq
-        if event_id:
-            data["event_id"] = event_id
-        return await asyncio.to_thread(self._do_post, self._messages_url(target_id, is_group), data)
+        payload = Reply(markdown=md_content, keyboard=keyboard).to_payload(
+            message_id=message_id,
+            event_id=event_id,
+            msg_seq=msg_seq,
+            mention_user_id=mention_user_id,
+        )
+        return await asyncio.to_thread(self._do_post, self._messages_url(target_id, is_group), payload)
 
     async def send_image(
         self,
@@ -317,7 +312,12 @@ class BasePlugin(ABC):
                 MessageSender.send_message, target_id, "text", text, False
             )
 
-        payload = reply.to_payload(message_id=message_id, event_id=event_id, msg_seq=msg_seq)
+        payload = reply.to_payload(
+            message_id=message_id,
+            event_id=event_id,
+            msg_seq=msg_seq,
+            mention_user_id=self._get_executor_user_id_from_event(event_data),
+        )
         return await asyncio.to_thread(
             self._do_post, self._messages_url(target_id, target_kind == "group"), payload
         )
@@ -347,3 +347,18 @@ class BasePlugin(ABC):
         if event_data.get("type") == "INTERACTION_CREATE":
             return None, event_data.get("_ws_event_id") or event_data.get("id")
         return event_data.get("id"), event_data.get("_ws_event_id")
+
+    def _get_executor_user_id_from_event(self, event_data: Dict[str, Any]) -> Optional[str]:
+        """提取当前事件的执行人 ID，用于 markdown @。"""
+        data = event_data.get("data", {}) or {}
+        resolved = data.get("resolved", {}) or {}
+        author = event_data.get("author", {}) or {}
+        return (
+            resolved.get("user_id")
+            or event_data.get("group_member_openid")
+            or event_data.get("user_openid")
+            or author.get("user_openid")
+            or author.get("id")
+            or author.get("openid")
+            or event_data.get("openid")
+        )

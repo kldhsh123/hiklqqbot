@@ -15,16 +15,17 @@ from ui_builder import make_command_button, make_button_row, make_keyboard
 
 # 菜单样式配置文件路径 (项目根目录)
 MENU_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "menu_config.json")
+MENU_INTRO_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "menu_intro.json")
 
 DEFAULT_MENU_CONFIG = {
     "root": {
-        "header_md": "# 📖 帮助菜单\n\n欢迎使用本机器人, 请选择一个分类查看可用命令：\n",
+        "header_md": "# 📖 帮助菜单\n\n{intro_block}",
         "footer_md": "\n> 点击上方文字进入对应分类",
         "show_buttons": True,
         "show_home_button": False,
     },
     "non_admin_category": {
-        "header_md": "# 帮助 - {breadcrumb}\n",
+        "header_md": "# 帮助 - {breadcrumb}\n\n{intro_block}",
         "before_commands_md": "## 命令 ({page}/{total_pages} 页, 共 {count} 个)\n",
         "footer_md": "\n> 发送 `/help` 返回主菜单",
         "columns": 3,
@@ -36,7 +37,7 @@ DEFAULT_MENU_CONFIG = {
         "row_divider": "***",
     },
     "admin_category": {
-        "header_md": "# 🔧 帮助 - 管理\n\n共 {count} 个命令，点击按钮执行：\n",
+        "header_md": "# 🔧 帮助 - 管理\n\n{intro_block}共 {count} 个命令，点击按钮执行：\n",
         "continuation_header_md": "# 🔧 帮助 - 管理 (续 {page})",
         "buttons_per_row": 3,
         "rows_per_msg_first": 4,
@@ -47,7 +48,7 @@ DEFAULT_MENU_CONFIG = {
 
 DEFAULT_MENU_CONFIG_FILE = {
     "_comment": "菜单排版配置 - 修改后需重启或重载插件生效",
-    "_placeholders": "支持占位符: {breadcrumb}, {count}, {page}, {total_pages}",
+    "_placeholders": "支持占位符: {breadcrumb}, {count}, {page}, {total_pages}, {intro}, {intro_block}",
     "root": {
         "_comment": "顶层 /help 菜单 - 完全自定义 markdown",
         **DEFAULT_MENU_CONFIG["root"],
@@ -60,6 +61,20 @@ DEFAULT_MENU_CONFIG_FILE = {
         "_comment": "管理分类: 全按钮模式, 塞不下分多条消息",
         **DEFAULT_MENU_CONFIG["admin_category"],
     },
+}
+
+DEFAULT_MENU_INTRO = {
+    "root": "欢迎使用本机器人, 请选择一个分类查看可用命令：",
+    "categories": {
+        "管理": "这里是管理员命令入口。按钮对所有人可点，但实际执行仍会校验管理员权限。",
+    },
+}
+
+DEFAULT_MENU_INTRO_FILE = {
+    "_comment": "帮助菜单介绍文案配置 - 修改后需重启或重载插件生效",
+    "_usage": "root 为顶层介绍; categories 的 key 为分类路径，如 管理 或 工具/媒体",
+    "root": DEFAULT_MENU_INTRO["root"],
+    "categories": DEFAULT_MENU_INTRO["categories"],
 }
 
 
@@ -102,6 +117,41 @@ def _load_menu_config() -> dict:
     except Exception as e:
         logging.getLogger("plugin_manager").error(f"加载 menu_config.json 失败, 使用默认配置: {e}")
     return DEFAULT_MENU_CONFIG
+
+
+def _load_menu_intro() -> dict:
+    """加载 menu_intro.json, 失败时使用默认值。"""
+    try:
+        if not os.path.exists(MENU_INTRO_PATH):
+            with open(MENU_INTRO_PATH, "w", encoding="utf-8") as f:
+                json.dump(DEFAULT_MENU_INTRO_FILE, f, ensure_ascii=False, indent=2)
+            logging.getLogger("plugin_manager").info(
+                f"menu_intro.json 不存在，已自动生成默认配置: {MENU_INTRO_PATH}"
+            )
+
+        with open(MENU_INTRO_PATH, "r", encoding="utf-8") as f:
+            user_config = json.load(f)
+
+        merged = {
+            "root": DEFAULT_MENU_INTRO.get("root", ""),
+            "categories": dict(DEFAULT_MENU_INTRO.get("categories", {})),
+        }
+        if isinstance(user_config, dict):
+            root_intro = user_config.get("root")
+            if isinstance(root_intro, str):
+                merged["root"] = root_intro
+
+            categories = user_config.get("categories")
+            if isinstance(categories, dict):
+                merged["categories"].update({
+                    str(path): text
+                    for path, text in categories.items()
+                    if not str(path).startswith("_") and isinstance(text, str)
+                })
+        return merged
+    except Exception as e:
+        logging.getLogger("plugin_manager").error(f"加载 menu_intro.json 失败, 使用默认配置: {e}")
+    return DEFAULT_MENU_INTRO
 
 logger = logging.getLogger("plugin_manager")
 
@@ -476,17 +526,20 @@ class PluginManager:
         Args:
             path: 分类路径; 空表示顶层
             page: 页码 (仅命令列表会分页)
-            caller_openid: 调用者 openid, 用于按钮权限限定
+            caller_openid: 调用者 openid (保留兼容，当前不再用于限制帮助菜单按钮权限)
             is_group: 是否群聊场景 (影响 markdown 内点击文字标签选择)
         """
         from config import HELP_BUTTON_ACTION_TYPE
 
         menu_config = _load_menu_config()
+        intro_config = _load_menu_intro()
         tree = self.build_category_tree(show_hidden=False)
         path_segments = [p for p in path.strip("/").split("/") if p.strip()] if path else []
 
         if not path_segments:
-            return [self._render_root_help(tree, caller_openid, menu_config, HELP_BUTTON_ACTION_TYPE, is_group)]
+            return [self._render_root_help(
+                tree, caller_openid, menu_config, HELP_BUTTON_ACTION_TYPE, is_group, intro_config,
+            )]
 
         node = self._walk_tree(tree, path_segments)
         if not node:
@@ -495,27 +548,61 @@ class PluginManager:
         # 管理分类: 全按钮模式 (塞不下分多条)
         if path_segments[0] == "管理":
             return self._render_admin_category(
-                path_segments, node, caller_openid, menu_config, HELP_BUTTON_ACTION_TYPE,
+                path_segments, node, caller_openid, menu_config, HELP_BUTTON_ACTION_TYPE, intro_config,
             )
 
         # 其他分类: markdown 左右两列排版
         return [self._render_category_help_md(
-            path_segments, node, page, caller_openid, menu_config, HELP_BUTTON_ACTION_TYPE, is_group,
+            path_segments, node, page, caller_openid, menu_config, HELP_BUTTON_ACTION_TYPE, is_group, intro_config,
         )]
+
+    def _get_menu_intro(self, intro_config: dict, path_segments: List[str]) -> str:
+        """获取当前路径的介绍文案。分类按最近的父路径回退。"""
+        if not path_segments:
+            return str(intro_config.get("root", "") or "")
+
+        categories = intro_config.get("categories", {}) or {}
+        for idx in range(len(path_segments), 0, -1):
+            intro = categories.get("/".join(path_segments[:idx]))
+            if isinstance(intro, str) and intro:
+                return intro
+        return ""
+
+    def _build_help_template_ctx(
+        self,
+        *,
+        path_segments: Optional[List[str]] = None,
+        count: int = 0,
+        page: int = 1,
+        total_pages: int = 1,
+        intro_config: Optional[dict] = None,
+    ) -> Dict[str, object]:
+        path_segments = path_segments or []
+        intro = self._get_menu_intro(intro_config or {}, path_segments)
+        return {
+            "breadcrumb": " / ".join(path_segments),
+            "count": count,
+            "page": page,
+            "total_pages": total_pages,
+            "intro": intro,
+            "intro_block": f"{intro}\n\n***\n\n" if intro else "",
+        }
 
     def _render_root_help(self, tree: Dict, caller: Optional[str],
                           menu_config: dict, button_action_type: int,
-                          is_group: bool = False) -> Reply:
+                          is_group: bool = False,
+                          intro_config: Optional[dict] = None) -> Reply:
         """顶层菜单: 用 root.header_md / footer_md 自由模板。"""
         cfg = menu_config.get("root", {})
         show_buttons = bool(cfg.get("show_buttons", True))
 
         categories = sorted(tree.keys())
         total_count = sum(self._count_plugins(tree[c]) for c in categories)
+        ctx = self._build_help_template_ctx(count=total_count, intro_config=intro_config)
 
         parts: List[str] = []
         # header
-        header = _render_template(cfg.get("header_md", ""), count=total_count)
+        header = _render_template(cfg.get("header_md", ""), **ctx)
         if header:
             parts.append(header)
 
@@ -529,7 +616,7 @@ class PluginManager:
                 parts.append(f"- **{cat}** ({count} 个命令)  {click}")
 
         # footer
-        footer = _render_template(cfg.get("footer_md", ""), count=total_count)
+        footer = _render_template(cfg.get("footer_md", ""), **ctx)
         if footer:
             parts.append(footer)
 
@@ -538,11 +625,10 @@ class PluginManager:
         keyboard = None
         if show_buttons and categories:
             rows, current_row = [], []
-            perm_users = [caller] if caller else None
             for idx, cat in enumerate(categories[:15]):
                 current_row.append(make_command_button(
                     button_id=f"cat_{idx}", label=cat, command=f"/help {cat}",
-                    action_type=button_action_type, permission_user_ids=perm_users, style=1,
+                    action_type=button_action_type, style=1,
                 ))
                 if len(current_row) == 3:
                     rows.append(make_button_row(current_row))
@@ -581,7 +667,8 @@ class PluginManager:
 
     def _render_admin_category(self, path_segments: List[str], node: Dict,
                                 caller: Optional[str], menu_config: dict,
-                                action_type: int) -> List[Reply]:
+                                action_type: int,
+                                intro_config: Optional[dict] = None) -> List[Reply]:
         """管理分类专属渲染: 全按钮模式, 塞不下分多条。"""
         cfg = menu_config.get("admin_category", {})
         BUTTONS_PER_ROW = int(cfg.get("buttons_per_row", 3))
@@ -592,7 +679,6 @@ class PluginManager:
         include_home = bool(cfg.get("include_home_button", True))
 
         plugins = self._collect_all_plugins(node)
-        perm_users = [caller] if caller else None
         breadcrumb = " / ".join(path_segments)
 
         replies: List[Reply] = []
@@ -615,7 +701,6 @@ class PluginManager:
                     label=p.get_display_name(),
                     command=p.command,
                     action_type=action_type,
-                    permission_user_ids=perm_users,
                     style=1,
                 ))
                 if len(current_row) == BUTTONS_PER_ROW:
@@ -628,14 +713,20 @@ class PluginManager:
                 rows.append(make_button_row([
                     make_command_button(
                         "home", "🏠 主菜单", "/help",
-                        action_type=action_type, permission_user_ids=perm_users, style=0,
+                        action_type=action_type, style=0,
                     ),
                 ]))
 
+            ctx = self._build_help_template_ctx(
+                path_segments=path_segments,
+                count=total,
+                page=page_num,
+                intro_config=intro_config,
+            )
             if is_first:
-                md = _render_template(header_tpl, count=total, breadcrumb=breadcrumb, page=page_num)
+                md = _render_template(header_tpl, **ctx)
             else:
-                md = _render_template(cont_header_tpl, count=total, breadcrumb=breadcrumb, page=page_num)
+                md = _render_template(cont_header_tpl, **ctx)
 
             replies.append(Reply(markdown=md, keyboard=make_keyboard(rows)))
         return replies if replies else [Reply(text="管理分类暂无命令")]
@@ -652,6 +743,7 @@ class PluginManager:
         self, path_segments: List[str], node: Dict, page: int,
         caller: Optional[str], menu_config: dict, button_action_type: int,
         is_group: bool,
+        intro_config: Optional[dict] = None,
     ) -> Reply:
         """非管理分类: 命令网格排版 (默认 3 列) + 自由 md 模板。"""
         cfg = menu_config.get("non_admin_category", {})
@@ -676,10 +768,13 @@ class PluginManager:
         start = (page - 1) * page_size
         page_plugins = plugins[start:start + page_size]
 
-        ctx = {
-            "breadcrumb": breadcrumb, "count": len(plugins),
-            "page": page, "total_pages": total_pages,
-        }
+        ctx = self._build_help_template_ctx(
+            path_segments=path_segments,
+            count=len(plugins),
+            page=page,
+            total_pages=total_pages,
+            intro_config=intro_config,
+        )
         parts: List[str] = []
 
         header = _render_template(header_tpl, **ctx)
@@ -729,19 +824,18 @@ class PluginManager:
         # 按钮: 翻页 + 返回主菜单
         keyboard = None
         rows = []
-        perm_users = [caller] if caller else None
 
         if show_buttons and total_pages > 1:
             nav_btns = []
             if page > 1:
                 nav_btns.append(make_command_button(
                     "prev", "⬅ 上一页", f"/help {breadcrumb} {page - 1}",
-                    action_type=button_action_type, permission_user_ids=perm_users, style=0,
+                    action_type=button_action_type, style=0,
                 ))
             if page < total_pages:
                 nav_btns.append(make_command_button(
                     "next", "下一页 ➡", f"/help {breadcrumb} {page + 1}",
-                    action_type=button_action_type, permission_user_ids=perm_users, style=0,
+                    action_type=button_action_type, style=0,
                 ))
             if nav_btns:
                 rows.append(make_button_row(nav_btns))
@@ -750,7 +844,7 @@ class PluginManager:
             rows.append(make_button_row([
                 make_command_button(
                     "home", "🏠 返回主菜单", "/help",
-                    action_type=button_action_type, permission_user_ids=perm_users, style=1,
+                    action_type=button_action_type, style=1,
                 ),
             ]))
 
@@ -766,7 +860,6 @@ class PluginManager:
     ) -> Optional[Dict]:
         """构造分类页的按钮键盘。"""
         rows = []
-        perm_users = [caller] if caller else None
         current_path = "/".join(path_segments)
 
         # Row 1-2: 子分类入口 (最多 6 个)
@@ -779,7 +872,6 @@ class PluginManager:
                     label=sub,
                     command=f"/help {sub_path}",
                     action_type=action_type,
-                    permission_user_ids=perm_users,
                     style=1,
                 ))
             # 按每行3个切分
@@ -795,7 +887,6 @@ class PluginManager:
                     label=f"⬅ 上一页",
                     command=f"/help {current_path} {page - 1}",
                     action_type=action_type,
-                    permission_user_ids=perm_users,
                     style=0,
                 ))
             if page < total_pages:
@@ -804,7 +895,6 @@ class PluginManager:
                     label=f"下一页 ➡",
                     command=f"/help {current_path} {page + 1}",
                     action_type=action_type,
-                    permission_user_ids=perm_users,
                     style=0,
                 ))
             if page_buttons:
@@ -819,7 +909,6 @@ class PluginManager:
                 label=f"⬆ 返回 {path_segments[-2]}",
                 command=f"/help {parent_path}",
                 action_type=action_type,
-                permission_user_ids=perm_users,
                 style=0,
             ))
         nav_buttons.append(make_command_button(
@@ -827,7 +916,6 @@ class PluginManager:
             label="🏠 主菜单",
             command="/help",
             action_type=action_type,
-            permission_user_ids=perm_users,
             style=0,
         ))
         rows.append(make_button_row(nav_buttons))
