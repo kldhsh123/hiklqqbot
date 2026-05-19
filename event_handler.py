@@ -10,6 +10,7 @@ import traceback
 from typing import Optional, Dict, Any
 from stats_manager import stats_manager
 from message_archive import message_archive
+from framework_db import framework_db
 from enhanced_message_types import (
     EventType, EnhancedMessage, EventDataNormalizer,
     extract_user_id, extract_target_info, normalize_event
@@ -27,6 +28,13 @@ logger = logging.getLogger("event_handler")
 
 # 从环境变量读取配置
 ENFORCE_COMMAND_PREFIX = os.environ.get("ENFORCE_COMMAND_PREFIX", "true").lower() == "true"
+BOT_OPENID_META_KEY = "bot_openid"
+BIND_BOT_OPENID_COMMAND = "/绑定机器人openid"
+LEADING_MENTION_PATTERNS = (
+    (re.compile(r"^\s*<@!?([^>\s]+)>\s*"), True),
+    (re.compile(r'^\s*<qqbot-at-user\b[^>]*\bid=["\']([^"\']+)["\'][^>]*\/?>\s*'), True),
+    (re.compile(r"^\s*@([^\s/]+)\s*"), False),
+)
 
 class EventHandler:
     """
@@ -301,25 +309,81 @@ class EventHandler:
             self.logger.error(f"发送回复时出错: {e}")
             self.logger.error(traceback.format_exc())
 
-    def _strip_leading_mentions(self, content: str) -> tuple[str, bool]:
-        """剥离消息开头的 @ 机器人片段，兼容全量群消息。"""
+    def _get_bound_bot_openid(self) -> Optional[str]:
+        """读取已绑定的机器人 openid。"""
+        bot_openid = framework_db.meta_get(BOT_OPENID_META_KEY)
+        return bot_openid.strip() if bot_openid else None
+
+    def _bind_bot_openid(self, bot_openid: str, bound_by: Optional[str] = None):
+        """保存机器人 openid 到框架 sqlite meta。"""
+        framework_db.meta_set(BOT_OPENID_META_KEY, bot_openid)
+        if bound_by:
+            framework_db.meta_set("bot_openid_bound_by", bound_by)
+
+    def _strip_leading_mentions(self, content: str) -> tuple[str, bool, list[str]]:
+        """剥离消息开头的 @ 片段，并提取 QQ 全量消息里的 openid。"""
         clean_content = content or ""
         mentioned = False
-        patterns = (
-            r"^\s*<@![^>]+>\s*",
-            r"^\s*<qqbot-at-user\b[^>]*\/?>\s*",
-            r"^\s*@([^\s/]+)\s*",
-        )
+        mention_ids: list[str] = []
 
         while True:
             original = clean_content
-            for pattern in patterns:
-                clean_content = re.sub(pattern, "", clean_content, count=1)
+            for pattern, captures_openid in LEADING_MENTION_PATTERNS:
+                match = pattern.match(clean_content)
+                if not match:
+                    continue
+                mention_id = match.group(1).strip() if captures_openid else ""
+                if captures_openid and mention_id:
+                    mention_ids.append(mention_id)
+                clean_content = clean_content[match.end():]
+                break
             if clean_content == original:
                 break
             mentioned = True
 
-        return clean_content.strip(), mentioned
+        return clean_content.strip(), mentioned, mention_ids
+
+    async def _handle_bind_bot_openid_command(
+        self,
+        data: Dict[str, Any],
+        user_id: Optional[str],
+        mention_ids: list[str],
+        params: str = "",
+    ) -> bool:
+        """管理员通过 @ 机器人绑定全量消息里的机器人 openid。"""
+        group_openid = data.get("group_openid")
+        event_type = data.get("type")
+        is_full_group_message = self._is_full_group_message_event(event_type)
+
+        if not auth_manager.is_admin(user_id):
+            await self._send_event_response(data, "您没有权限执行此命令，请联系管理员")
+            return True
+
+        bot_openid = mention_ids[0] if mention_ids else ""
+        if not bot_openid:
+            await self._send_event_response(data, f"请先 @ 机器人，再发送 `{BIND_BOT_OPENID_COMMAND}`")
+            return True
+
+        old_openid = self._get_bound_bot_openid()
+        self._bind_bot_openid(bot_openid, bound_by=user_id)
+        stats_manager.log_command("绑定机器人openid", user_id, group_openid)
+        if is_full_group_message:
+            message_archive.log_command_message(
+                data,
+                user_id=user_id,
+                group_openid=group_openid,
+                command="绑定机器人openid",
+                invoked_command=BIND_BOT_OPENID_COMMAND,
+                params=params,
+            )
+
+        if old_openid and old_openid != bot_openid:
+            response = f"已更新机器人 openid：`{old_openid}` -> `{bot_openid}`"
+        else:
+            response = f"已绑定机器人 openid：`{bot_openid}`"
+        self.logger.info(f"机器人 openid 已绑定: {bot_openid}, bound_by={user_id}")
+        await self._send_event_response(data, response)
+        return True
 
     async def handle_at_message(self, data):
         """处理频道@消息"""
@@ -457,9 +521,22 @@ class EventHandler:
 
             return False  # 被黑名单阻止，不处理
 
-        clean_content, has_leading_mention = self._strip_leading_mentions(content)
-        is_at_message = event_type in ["AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"] or (
-            is_full_group_message and has_leading_mention
+        stripped_content, _has_leading_mention, mention_ids = self._strip_leading_mentions(content)
+        bound_bot_openid = self._get_bound_bot_openid()
+        mention_matches_bound_bot = bool(
+            bound_bot_openid and bound_bot_openid in mention_ids
+        )
+        stripped_command = stripped_content.split(' ', 1)[0] if stripped_content else ""
+        is_bind_bot_openid_command = stripped_command.lower() == BIND_BOT_OPENID_COMMAND.lower()
+        is_explicit_at_message = event_type in ["AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"]
+        should_accept_stripped_content = (
+            is_explicit_at_message
+            or mention_matches_bound_bot
+            or (is_full_group_message and is_bind_bot_openid_command and bool(mention_ids))
+        )
+        clean_content = stripped_content if should_accept_stripped_content else (content or "").strip()
+        is_at_message = is_explicit_at_message or (
+            is_full_group_message and mention_matches_bound_bot
         )
         is_direct_message = event_type in ["DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE"]
         suppress_invalid_feedback = FULL_MESSAGE_MODE and is_full_group_message
@@ -515,6 +592,9 @@ class EventHandler:
         params = parts[1] if len(parts) > 1 else ""
         
         command = command_raw
+
+        if command.lower() == BIND_BOT_OPENID_COMMAND.lower():
+            return await self._handle_bind_bot_openid_command(data, user_id, mention_ids, params)
         
         # 检查命令前缀和私聊的特殊处理
         if ENFORCE_COMMAND_PREFIX and not command.startswith('/') and not is_direct_message and not is_at_message:
