@@ -305,7 +305,6 @@ class StatsManager:
     def _clear_stats_tables(self, conn: sqlite3.Connection):
         tables = [
             "stats_user_name_history",
-            "stats_group_name_history",
             "stats_group_members",
             "stats_users",
             "stats_groups",
@@ -405,12 +404,10 @@ class StatsManager:
                 "join_time": join_time,
                 "last_active": last_active,
                 "added_by": group_info.get("added_by"),
-                "group_name": group_info.get("group_name"),
                 "can_send_proactive_msg": self._bool_to_int(
                     group_info.get("can_send_proactive_msg"), True
                 ),
                 "members": list(group_info.get("members") or []),
-                "group_name_history": list(group_info.get("group_name_history") or []),
             }
 
         for group_openid, group_info in group_rows.items():
@@ -429,10 +426,8 @@ class StatsManager:
                     "join_time": now,
                     "last_active": now,
                     "added_by": None,
-                    "group_name": None,
                     "can_send_proactive_msg": 1,
                     "members": [],
-                    "group_name_history": [],
                 }
             if user_openid not in user_rows:
                 user_rows[user_openid] = {
@@ -482,28 +477,17 @@ class StatsManager:
                 conn.execute(
                     """
                     INSERT INTO stats_groups(
-                        group_openid, join_time, last_active, added_by, group_name,
+                        group_openid, join_time, last_active, added_by,
                         can_send_proactive_msg
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?)
                     """,
                     (
                         group_openid,
                         group_info["join_time"],
                         group_info["last_active"],
                         group_info["added_by"],
-                        group_info["group_name"],
                         group_info["can_send_proactive_msg"],
                     ),
-                )
-                self._insert_name_history_rows(
-                    conn,
-                    "stats_group_name_history",
-                    "group_openid",
-                    group_openid,
-                    group_info["group_name"],
-                    group_info["join_time"],
-                    group_info["last_active"],
-                    group_info["group_name_history"],
                 )
 
             for (group_openid, user_openid), joined_at in memberships.items():
@@ -740,8 +724,6 @@ class StatsManager:
         }
         if row["added_by"] is not None:
             data["added_by"] = row["added_by"]
-        if row["group_name"] is not None:
-            data["group_name"] = row["group_name"]
         return data
 
     def _get_membership_map_by_group(self) -> Dict[str, List[str]]:
@@ -853,7 +835,7 @@ class StatsManager:
         with framework_db.transaction() as conn:
             row = conn.execute(
                 """
-                SELECT group_openid, join_time, last_active, added_by, group_name, can_send_proactive_msg
+                SELECT group_openid, join_time, last_active, added_by, can_send_proactive_msg
                 FROM stats_groups
                 WHERE group_openid = ?
                 """,
@@ -864,27 +846,17 @@ class StatsManager:
                 conn.execute(
                     """
                     INSERT INTO stats_groups(
-                        group_openid, join_time, last_active, added_by, group_name, can_send_proactive_msg
-                    ) VALUES (?, ?, ?, ?, ?, 1)
+                        group_openid, join_time, last_active, added_by, can_send_proactive_msg
+                    ) VALUES (?, ?, ?, ?, 1)
                     """,
-                    (group_openid, current_time, current_time, op_member_openid, name),
+                    (group_openid, current_time, current_time, op_member_openid),
                 )
-                if name:
-                    conn.execute(
-                        """
-                        INSERT INTO stats_group_name_history(group_openid, name, first_seen, last_active)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (group_openid, name, current_time, current_time),
-                    )
-                self.logger.info(f"添加新群组: {group_openid} (name={name})")
+                self.logger.info(f"添加新群组: {group_openid}")
             else:
                 conn.execute(
                     "UPDATE stats_groups SET last_active = ? WHERE group_openid = ?",
                     (current_time, group_openid),
                 )
-                if name:
-                    self._update_group_name_history(conn, group_openid, name, current_time)
 
         self.get_group_display_id(group_openid)
         return self.get_group(group_openid)
@@ -899,7 +871,6 @@ class StatsManager:
 
         with framework_db.transaction() as conn:
             conn.execute("DELETE FROM stats_group_members WHERE group_openid = ?", (group_openid,))
-            conn.execute("DELETE FROM stats_group_name_history WHERE group_openid = ?", (group_openid,))
             conn.execute("DELETE FROM stats_groups WHERE group_openid = ?", (group_openid,))
         self.logger.info(f"移除群组: {group_openid}")
         return True
@@ -907,7 +878,7 @@ class StatsManager:
     def get_group(self, group_openid: str) -> Optional[dict]:
         row = framework_db.fetchone(
             """
-            SELECT group_openid, join_time, last_active, added_by, group_name, can_send_proactive_msg
+            SELECT group_openid, join_time, last_active, added_by, can_send_proactive_msg
             FROM stats_groups
             WHERE group_openid = ?
             """,
@@ -920,7 +891,7 @@ class StatsManager:
     def get_all_groups(self) -> Dict[str, dict]:
         rows = framework_db.fetchall(
             """
-            SELECT group_openid, join_time, last_active, added_by, group_name, can_send_proactive_msg
+            SELECT group_openid, join_time, last_active, added_by, can_send_proactive_msg
             FROM stats_groups
             """
         )
@@ -1085,51 +1056,6 @@ class StatsManager:
             (new_name, user_openid),
         )
 
-    def _update_group_name_history(
-        self, conn: sqlite3.Connection, group_openid: str, new_name: str, now: float
-    ):
-        current_row = conn.execute(
-            "SELECT group_name FROM stats_groups WHERE group_openid = ?",
-            (group_openid,),
-        ).fetchone()
-        current_name = current_row["group_name"] if current_row else None
-
-        if current_name == new_name:
-            updated = conn.execute(
-                """
-                UPDATE stats_group_name_history
-                SET last_active = ?
-                WHERE id = (
-                    SELECT id FROM stats_group_name_history
-                    WHERE group_openid = ?
-                    ORDER BY first_seen DESC, id DESC
-                    LIMIT 1
-                )
-                """,
-                (now, group_openid),
-            )
-            if updated.rowcount == 0:
-                conn.execute(
-                    """
-                    INSERT INTO stats_group_name_history(group_openid, name, first_seen, last_active)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (group_openid, new_name, now, now),
-                )
-            return
-
-        conn.execute(
-            """
-            INSERT INTO stats_group_name_history(group_openid, name, first_seen, last_active)
-            VALUES (?, ?, ?, ?)
-            """,
-            (group_openid, new_name, now, now),
-        )
-        conn.execute(
-            "UPDATE stats_groups SET group_name = ? WHERE group_openid = ?",
-            (new_name, group_openid),
-        )
-
     def get_username(self, user_openid: str) -> Optional[str]:
         row = framework_db.fetchone(
             "SELECT username FROM stats_users WHERE user_openid = ?",
@@ -1146,32 +1072,6 @@ class StatsManager:
             ORDER BY first_seen ASC, id ASC
             """,
             (user_openid,),
-        )
-        return [
-            {
-                "name": row["name"],
-                "first_seen": float(row["first_seen"]),
-                "last_active": float(row["last_active"]),
-            }
-            for row in rows
-        ]
-
-    def get_groupname(self, group_openid: str) -> Optional[str]:
-        row = framework_db.fetchone(
-            "SELECT group_name FROM stats_groups WHERE group_openid = ?",
-            (group_openid,),
-        )
-        return row["group_name"] if row and row["group_name"] is not None else None
-
-    def get_groupname_history(self, group_openid: str) -> List[dict]:
-        rows = framework_db.fetchall(
-            """
-            SELECT name, first_seen, last_active
-            FROM stats_group_name_history
-            WHERE group_openid = ?
-            ORDER BY first_seen ASC, id ASC
-            """,
-            (group_openid,),
         )
         return [
             {

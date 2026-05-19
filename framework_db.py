@@ -94,20 +94,9 @@ class FrameworkDatabase:
             join_time REAL NOT NULL,
             last_active REAL NOT NULL,
             added_by TEXT,
-            group_name TEXT,
             can_send_proactive_msg INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS idx_stats_groups_last_active ON stats_groups(last_active DESC);
-
-        CREATE TABLE IF NOT EXISTS stats_group_name_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_openid TEXT NOT NULL,
-            name TEXT NOT NULL,
-            first_seen REAL NOT NULL,
-            last_active REAL NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_stats_group_name_history
-            ON stats_group_name_history(group_openid, first_seen DESC);
 
         CREATE TABLE IF NOT EXISTS stats_group_members (
             group_openid TEXT NOT NULL,
@@ -189,6 +178,7 @@ class FrameworkDatabase:
 
         with self._lock, self._conn:
             self._conn.executescript(schema)
+            self._drop_obsolete_group_name_schema()
             self._conn.execute(
                 """
                 INSERT INTO maintenance_state(id, enabled, updated_at)
@@ -204,6 +194,55 @@ class FrameworkDatabase:
                 ON CONFLICT(id) DO NOTHING
                 """
             )
+
+    def _drop_obsolete_group_name_schema(self):
+        """移除旧版本预留的群名存储，群名不再作为框架统计字段维护。"""
+        self._conn.execute("DROP TABLE IF EXISTS stats_group_name_history")
+        columns = [
+            str(row["name"])
+            for row in self._conn.execute("PRAGMA table_info(stats_groups)").fetchall()
+        ]
+        if "group_name" not in columns:
+            return
+        try:
+            self._conn.execute("ALTER TABLE stats_groups DROP COLUMN group_name")
+        except sqlite3.OperationalError as e:
+            logger.info(f"直接删除旧群名字段失败，改用重建表方式清理: {e}")
+            self._rebuild_stats_groups_without_group_name()
+
+    def _rebuild_stats_groups_without_group_name(self):
+        self._conn.execute("SAVEPOINT rebuild_stats_groups_without_group_name")
+        try:
+            self._conn.execute("ALTER TABLE stats_groups RENAME TO stats_groups_with_group_name")
+            self._conn.execute(
+                """
+                CREATE TABLE stats_groups (
+                    group_openid TEXT PRIMARY KEY,
+                    join_time REAL NOT NULL,
+                    last_active REAL NOT NULL,
+                    added_by TEXT,
+                    can_send_proactive_msg INTEGER NOT NULL DEFAULT 1
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                INSERT INTO stats_groups(
+                    group_openid, join_time, last_active, added_by, can_send_proactive_msg
+                )
+                SELECT group_openid, join_time, last_active, added_by, can_send_proactive_msg
+                FROM stats_groups_with_group_name
+                """
+            )
+            self._conn.execute("DROP TABLE stats_groups_with_group_name")
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stats_groups_last_active ON stats_groups(last_active DESC)"
+            )
+        except sqlite3.OperationalError:
+            self._conn.execute("ROLLBACK TO rebuild_stats_groups_without_group_name")
+            raise
+        finally:
+            self._conn.execute("RELEASE rebuild_stats_groups_without_group_name")
 
     @contextmanager
     def transaction(self):

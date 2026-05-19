@@ -586,6 +586,8 @@ QQ 平台对**主动消息** 的发送权限已被收回
 
 HiklQQBot 框架内置了数据统计系统，用于记录和管理机器人的统计数据，包括群组、用户和消息等信息。插件开发者可以使用这些数据来增强功能。
 
+当前统计数据由框架写入 sqlite（`FRAMEWORK_DB_PATH`，默认 `data/framework.db`）。插件不要直接读取旧的 `data/*.json` 统计文件，也不要依赖内部表结构；请通过 `stats_manager` 的公开 API 查询。
+
 ### 统计系统的功能
 
 统计系统主要包括以下功能：
@@ -611,7 +613,7 @@ class MyPlugin(BasePlugin):
         # 获取用户信息
         user_info = stats_manager.get_user(user_id)
         if user_info:
-            user_name = user_info.get("name", "未知用户")
+            user_name = user_info.get("username") or "未知用户"
             user_avatar = user_info.get("avatar")
             return f"你好，{user_name}！"
         else:
@@ -634,14 +636,13 @@ class GroupInfoPlugin(BasePlugin):
         # 获取群组成员ID列表
         member_ids = stats_manager.get_group_members(group_openid)
         
-        result = f"群组名称: {group_info.get('name', '未知')}\n"
-        result += f"成员数量: {len(member_ids)}\n\n"
+        result = f"成员数量: {len(member_ids)}\n\n"
         
         # 获取前5名成员信息
         result += "成员列表 (前5名):\n"
         for i, member_id in enumerate(member_ids[:5], 1):
             member_info = stats_manager.get_user(member_id)
-            member_name = member_info.get("name", "未知") if member_info else "未知"
+            member_name = (member_info.get("username") or "未知") if member_info else "未知"
             result += f"{i}. {member_name} ({member_id})\n"
         
         if len(member_ids) > 5:
@@ -650,75 +651,74 @@ class GroupInfoPlugin(BasePlugin):
         return result
 ```
 
-#### 记录命令使用情况
+#### 命令使用统计
+
+普通插件不需要手动调用 `stats_manager.log_command(...)`。框架在插件命令执行后会自动记录命令、用户和群组维度的使用量；插件内再次调用会导致重复计数。
+
+只有在插件绕过框架命令入口、自己处理额外事件或后台任务时，才应按需调用：
 
 ```python
-class CustomPlugin(BasePlugin):
-    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
-        # 记录命令使用
-        stats_manager.log_command(self.command, user_id, group_openid)
-        
-        # 处理命令...
-        return "命令已处理"
+stats_manager.log_command("custom_event", user_id, group_openid)
 ```
 
-### 统计数据结构
+### 统计返回结构
 
-统计系统维护以下主要数据结构：
+统计系统内部使用 sqlite 表存储数据。下面是公开 API 的返回结构，不代表数据库表结构；插件应该只读取这些返回值，不要直接修改。
 
-#### 群组数据
+#### `get_user(user_openid)` / `get_all_users()`
 
 ```python
 {
-    "group_id1": {
-        "join_time": 1234567890,  # 时间戳
-        "last_active": 1234567890,
-        "members": ["user_id1", "user_id2", ...],
-        "added_by": "user_id",
-    },
-    "group_id2": { ... }
+    "first_seen": 1234567890.0,
+    "last_active": 1234567890.0,
+    "username": "用户名称",           # 可能不存在
+    "avatar": "https://...",        # 可能不存在
+    "groups": ["group_openid1"],
+    "is_friend": True,
+    "can_send_proactive_msg": True,
 }
 ```
 
-#### 用户数据
+`get_all_users()` 返回 `{user_openid: user_info}`。
+
+#### `get_group(group_openid)` / `get_all_groups()`
 
 ```python
 {
-    "user_id1": {
-        "name": "用户名称",
-        "first_seen": 1234567890,  # 时间戳
-        "last_active": 1234567890,
-        "groups": ["group_id1", "group_id2", ...],
-    },
-    "user_id2": { ... }
+    "join_time": 1234567890.0,
+    "last_active": 1234567890.0,
+    "members": ["user_openid1"],
+    "added_by": "user_openid",      # 可能不存在
+    "can_send_proactive_msg": True,
 }
 ```
 
-#### 使用统计数据
+`get_all_groups()` 返回 `{group_openid: group_info}`。
+
+#### `get_usage_stats()`
 
 ```python
 {
-    "commands": {
-        "command1": 10,  # 使用次数
-        "command2": 5
-    },
-    "groups": {
-        "group_id1": 15,  # 消息数
-        "group_id2": 8
-    },
-    "users": {
-        "user_id1": 20,  # 消息数
-        "user_id2": 12
-    },
-    "total_messages": 100
+    "commands": {"点歌": 10},
+    "groups": {"group_openid": 15},
+    "users": {"user_openid": 20},
+    "total_messages": 100,
+    "command_messages": 80,
+    "other_messages": 20,
+    "command_groups": {"group_openid": 12},
+    "command_users": {"user_openid": 18},
+    "other_groups": {"group_openid": 3},
+    "other_users": {"user_openid": 2},
 }
 ```
+
+`get_daily_stats()` / `get_weekly_stats()` / `get_monthly_stats()` 返回类似结构，但总数字段名为 `total`。
 
 ### 统计系统API参考
 
 #### 群组相关方法
 
-- `stats_manager.add_group(group_openid, name=None, op_member_openid=None)`: 添加或更新群组信息
+- `stats_manager.add_group(group_openid, name=None, op_member_openid=None)`: 添加或更新群组信息；`name` 参数仅为旧插件兼容保留，不会存储群名
 - `stats_manager.remove_group(group_openid)`: 移除群组
 - `stats_manager.get_group(group_openid)`: 获取群组信息
 - `stats_manager.get_all_groups()`: 获取所有群组信息
@@ -731,13 +731,20 @@ class CustomPlugin(BasePlugin):
 - `stats_manager.add_user(user_openid, name=None, avatar=None)`: 添加或更新用户信息
 - `stats_manager.get_user(user_openid)`: 获取用户信息
 - `stats_manager.get_all_users()`: 获取所有用户信息
+- `stats_manager.get_username(user_openid)`: 获取当前用户名，未知时返回 `None`
+- `stats_manager.get_username_history(user_openid)`: 获取用户名历史记录
 
 #### 统计相关方法
 
-- `stats_manager.log_command(command, user_openid=None, group_openid=None)`: 记录命令使用
+- `stats_manager.log_command(command, user_openid=None, group_openid=None)`: 记录命令使用（普通插件命令由框架自动记录）
+- `stats_manager.log_other_message(user_openid=None, group_openid=None)`: 记录非命令消息
+- `stats_manager.get_usage_stats()`: 获取完整使用统计
 - `stats_manager.get_command_stats()`: 获取命令使用统计
 - `stats_manager.get_most_active_groups(limit=10)`: 获取最活跃的群组
 - `stats_manager.get_most_active_users(limit=10)`: 获取最活跃的用户
+- `stats_manager.get_daily_stats(date_str=None)`: 获取日统计，`date_str` 格式为 `YYYY-MM-DD`
+- `stats_manager.get_weekly_stats(week_str=None)`: 获取周统计，默认当前周
+- `stats_manager.get_monthly_stats(month_str=None)`: 获取月统计，`month_str` 格式为 `YYYY-MM`
 
 ### 使用内置统计插件
 
@@ -962,7 +969,7 @@ class DocumentedPlugin(BasePlugin):
 
 ### Q: 如何在插件之间共享数据？
 
-**A**: 您可以使用全局变量、单例模式或外部存储（如数据库）来共享数据。此外，您还可以使用统计系统（`stats_manager`）来存储和共享一些常用数据。
+**A**: 您可以使用全局变量、单例模式或外部存储（如 JSON、sqlite 等）来共享插件自己的数据。`stats_manager` 只用于读取框架维护的用户、群组和用量统计，不建议把插件业务数据写进统计系统。
 
 ### Q: 我的插件可以处理多个命令吗？
 
@@ -1299,8 +1306,6 @@ from stats_manager import stats_manager
 
 stats_manager.get_username(openid)         # 当前用户名
 stats_manager.get_username_history(openid) # [{name, first_seen, last_active}, ...]
-stats_manager.get_groupname(openid)        # 当前群名（QQ V2 群事件无此字段，预留）
-stats_manager.get_groupname_history(openid)
 ```
 
 事件 `author.username` 会在 `handle_at_message` / `handle_direct_message` / `handle_group_at_message` 中**自动**喂给 stats_manager，插件无需关心。
