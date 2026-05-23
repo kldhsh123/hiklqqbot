@@ -26,11 +26,9 @@ HiklQQBot 是一个基于 Python 的 QQ 官方机器人框架，支持 WebSocket
 
 HiklQQBot 提供了独立插件仓库和插件索引，方便按需扩展机器人功能：
 
-🔍 [浏览插件市场](PLUGINS.md) - 查看所有可用插件、GitHub仓库链接和安装指南
-
 📦 [官方插件仓库](https://github.com/kldhsh123/hiklqqbot-plugin) - 存放可直接复制到 `plugins/` 目录的独立插件
 
-你也可以[贡献自己的插件](PLUGINS.md#如何提交插件)，分享给社区使用！
+你也可以[贡献自己的插件](https://github.com/kldhsh123/hiklqqbot-plugin)，分享给社区使用！
 
 
 ## 安装
