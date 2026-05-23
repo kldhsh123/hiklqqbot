@@ -9,20 +9,32 @@ from auth_manager import auth_manager
 import traceback
 from typing import Optional, Dict, Any
 from stats_manager import stats_manager
+from message_archive import message_archive
+from framework_db import framework_db
 from enhanced_message_types import (
     EventType, EnhancedMessage, EventDataNormalizer,
     extract_user_id, extract_target_info, normalize_event
 )
 from blacklist_manager import blacklist_manager
-from config import ENABLE_BLACKLIST, BLACKLIST_SHOW_REASON
+from config import (
+    ENABLE_BLACKLIST, BLACKLIST_SHOW_REASON, API_BASE_URL,
+    HELP_BUTTON_ACTION_TYPE, FULL_MESSAGE_MODE,
+)
+from reply import Reply
+from ui_builder import make_button_row, make_command_button, make_keyboard
 
 # 配置日志
 logger = logging.getLogger("event_handler")
 
 # 从环境变量读取配置
-ENABLE_AI_CHAT = os.environ.get("ENABLE_AI_CHAT", "true").lower() == "true"
-AI_CHAT_MENTION_TRIGGER = os.environ.get("AI_CHAT_MENTION_TRIGGER", "true").lower() == "true"
 ENFORCE_COMMAND_PREFIX = os.environ.get("ENFORCE_COMMAND_PREFIX", "true").lower() == "true"
+BOT_OPENID_META_KEY = "bot_openid"
+BIND_BOT_OPENID_COMMAND = "/绑定机器人openid"
+LEADING_MENTION_PATTERNS = (
+    (re.compile(r"^\s*<@!?([^>\s]+)>\s*"), True),
+    (re.compile(r'^\s*<qqbot-at-user\b[^>]*\bid=["\']([^"\']+)["\'][^>]*\/?>\s*'), True),
+    (re.compile(r"^\s*@([^\s/]+)\s*"), False),
+)
 
 class EventHandler:
     """
@@ -38,6 +50,7 @@ class EventHandler:
             "AT_MESSAGE_CREATE": self.handle_at_message,
             "DIRECT_MESSAGE_CREATE": self.handle_direct_message,
             "C2C_MESSAGE_CREATE": self.handle_c2c_message,
+            "GROUP_MESSAGE_CREATE": self.handle_group_message,
             "GROUP_AT_MESSAGE_CREATE": self.handle_group_at_message,
             "READY": self.handle_ready,
             "RESUMED": self.handle_resumed,
@@ -54,7 +67,7 @@ class EventHandler:
             "C2C_MSG_REJECT": self.handle_c2c_msg_reject,
             "C2C_MSG_RECEIVE": self.handle_c2c_msg_receive,
 
-            # Botpy扩展事件支持
+            # 频道/扩展事件支持
             "MESSAGE_CREATE": self.handle_message_create,
             "MESSAGE_DELETE": self.handle_message_delete,
             "GUILD_CREATE": self.handle_guild_create,
@@ -73,37 +86,7 @@ class EventHandler:
             "AUDIO_ON_MIC": self.handle_audio_on_mic,
             "AUDIO_OFF_MIC": self.handle_audio_off_mic
         }
-        
-        # AI聊天插件实例（仅当功能启用时）
-        self.ai_chat_plugin = None
-        self._load_ai_plugin_if_needed()
 
-    def _load_ai_plugin_if_needed(self):
-        """尝试加载AI聊天插件"""
-        if ENABLE_AI_CHAT and AI_CHAT_MENTION_TRIGGER and not self.ai_chat_plugin:
-            try:
-                # 先检查模块是否存在，避免导入不存在的模块
-                import importlib.util
-                spec = importlib.util.find_spec('plugins.hiklqqbot_ai_chat_plugin')
-                if spec is not None:
-                    # 模块存在，尝试导入
-                    from plugins import hiklqqbot_ai_chat_plugin
-                    
-                    # 检查是否定义了AIChatPlugin并在__all__中导出
-                    if hasattr(hiklqqbot_ai_chat_plugin, '__all__') and 'AIChatPlugin' in getattr(hiklqqbot_ai_chat_plugin, '__all__'):
-                        if hasattr(hiklqqbot_ai_chat_plugin, 'AIChatPlugin'):
-                            self.ai_chat_plugin = hiklqqbot_ai_chat_plugin.AIChatPlugin()
-                            self.logger.info("已加载AI聊天插件，@机器人将触发AI对话")
-                        else:
-                            self.logger.warning("AI聊天插件模块存在但未定义AIChatPlugin类")
-                    else:
-                        self.logger.info("AI聊天插件未在__all__中导出，不加载")
-                else:
-                    self.logger.info("未找到AI聊天插件模块，功能未启用")
-            except Exception as e:
-                self.logger.error(f"加载AI聊天插件失败: {e}")
-                self.ai_chat_plugin = None
-    
     async def handle_event(self, event_type, event_data):
         """处理事件分发"""
         self.logger.info(f"收到事件: {event_type}")
@@ -129,7 +112,7 @@ class EventHandler:
     def _get_user_id(self, data):
         """从事件数据中提取用户ID (优先author.id，然后是openid)"""
         author = data.get("author", {})
-        user_id = author.get("id")
+        user_id = author.get("user_openid") or author.get("id")
         if not user_id:
             user_id = author.get("openid")
         if not user_id:
@@ -137,6 +120,21 @@ class EventHandler:
         if not user_id:
             user_id = data.get("openid")
         return user_id
+
+    def _get_executor_user_id(self, data: Dict[str, Any]) -> Optional[str]:
+        """提取当前执行命令/点击按钮的用户 ID，用于 markdown @。"""
+        interaction_data = data.get("data", {}) or {}
+        resolved = interaction_data.get("resolved", {}) or {}
+        return (
+            resolved.get("user_id")
+            or data.get("group_member_openid")
+            or data.get("user_openid")
+            or self._get_user_id(data)
+        )
+
+    def _is_full_group_message_event(self, event_type: Optional[str]) -> bool:
+        """判断是否为已授权群的全量消息事件。"""
+        return event_type == "GROUP_MESSAGE_CREATE"
 
     def _format_expire_time(self, expire_time_str: str) -> str:
         """格式化过期时间为更易读的格式"""
@@ -218,62 +216,174 @@ class EventHandler:
             return user_openid, False
         return None, False
 
-    async def _run_plugin_and_reply(self, plugin, params: str, user_id: str, event_data: dict):
+    def _build_help_shortcut_reply(self, title: str, body: str, user_id: Optional[str] = None) -> Reply:
+        """构造带 /help 按钮的提示回复。"""
+        keyboard = make_keyboard([
+            make_button_row([
+                make_command_button(
+                    "help_shortcut",
+                    "/help",
+                    "/help",
+                    action_type=HELP_BUTTON_ACTION_TYPE,
+                    style=1,
+                )
+            ])
+        ])
+        parts = [f"## {title}"]
+        if body:
+            parts.append(body)
+        return Reply(markdown="\n\n".join(parts), keyboard=keyboard)
+
+    async def _send_event_response(self, event_data: Dict[str, Any], response: Any, msg_seq: int = 1) -> bool:
+        """根据响应类型发送事件回复。"""
+        if not response:
+            return False
+
+        message_id = event_data.get("id")
+        target_id, is_group = self._get_channel_id(event_data)
+        if not target_id:
+            self.logger.error(f"无法确定回复目标，事件数据: {event_data}")
+            return False
+
+        event_type = event_data.get("type")
+        responses = response if isinstance(response, list) else [response]
+        sent = False
+
+        for idx, item in enumerate(responses, start=msg_seq):
+            if not item:
+                continue
+
+            reply = item if isinstance(item, Reply) else Reply(text=str(item))
+            await self._send_rich_reply(
+                target_id, message_id, is_group, event_type, reply, event_data, msg_seq=idx
+            )
+            sent = True
+
+        return sent
+
+    async def _run_plugin_and_reply(self, plugin, params: str, user_id: str, event_data: dict, invoked_command: str = None):
         """在后台运行插件并处理回复"""
         response = None
+        group_openid = event_data.get("group_openid")
+        event_type = event_data.get("type")
+        is_full_group_message = self._is_full_group_message_event(event_type)
         try:
-            group_openid = event_data.get("group_openid")
-            response = await plugin.handle(params, user_id, group_openid=group_openid, event_data=event_data)
+            response = await plugin.handle(
+                params, user_id,
+                group_openid=group_openid,
+                event_data=event_data,
+                invoked_command=invoked_command or plugin.command,
+            )
+            stats_manager.log_command(plugin.command, user_id, group_openid)
+            if is_full_group_message:
+                message_archive.log_command_message(
+                    event_data,
+                    user_id=user_id,
+                    group_openid=group_openid,
+                    command=plugin.command,
+                    invoked_command=invoked_command or plugin.command,
+                    params=params,
+                )
         except Exception as e:
             self.logger.error(f"插件 {plugin.command} 处理命令时出错: {e}")
             self.logger.error(traceback.format_exc())
             response = f"处理命令 {plugin.command} 时出现内部错误。"
+            if is_full_group_message:
+                stats_manager.log_other_message(user_id, group_openid)
+                message_archive.log_other_message(
+                    event_data,
+                    user_id=user_id,
+                    group_openid=group_openid,
+                    reason="plugin_error",
+                    command=plugin.command,
+                    invoked_command=invoked_command or plugin.command,
+                    params=params,
+                )
 
-        if response:
-            try:
-                message_id = event_data.get("id")
-                target_id, is_group = self._get_channel_id(event_data)
-
-                if not target_id:
-                    self.logger.error(f"无法确定回复目标，事件数据: {event_data}")
-                    return
-
-                event_type = event_data.get("type")
-                await self._send_reply(target_id, message_id, is_group, event_type, response)
-
-            except Exception as e:
-                self.logger.error(f"发送回复时出错: {e}")
-                self.logger.error(traceback.format_exc())
-
-    async def _run_ai_chat_and_reply(self, event_data: dict, user_id: str):
-        """在后台运行AI聊天插件并处理回复"""
-        response = None
-        if not self.ai_chat_plugin:
-            self.logger.error("AI聊天插件未加载，无法处理AI回复")
+        if not response:
             return
 
         try:
-            response = await self.ai_chat_plugin.handle_at_message(event_data, user_id)
+            await self._send_event_response(event_data, response)
         except Exception as e:
-            self.logger.error(f"AI聊天插件处理时出错: {e}")
+            self.logger.error(f"发送回复时出错: {e}")
             self.logger.error(traceback.format_exc())
-            response = "AI思考时遇到了一些麻烦..."
 
-        if response:
-            try:
-                message_id = event_data.get("id")
-                target_id, is_group = self._get_channel_id(event_data)
+    def _get_bound_bot_openid(self) -> Optional[str]:
+        """读取已绑定的机器人 openid。"""
+        bot_openid = framework_db.meta_get(BOT_OPENID_META_KEY)
+        return bot_openid.strip() if bot_openid else None
 
-                if not target_id:
-                    self.logger.error(f"无法确定AI回复目标，事件数据: {event_data}")
-                    return
+    def _bind_bot_openid(self, bot_openid: str, bound_by: Optional[str] = None):
+        """保存机器人 openid 到框架 sqlite meta。"""
+        framework_db.meta_set(BOT_OPENID_META_KEY, bot_openid)
+        if bound_by:
+            framework_db.meta_set("bot_openid_bound_by", bound_by)
 
-                event_type = event_data.get("type")
-                await self._send_reply(target_id, message_id, is_group, event_type, response)
+    def _strip_leading_mentions(self, content: str) -> tuple[str, bool, list[str]]:
+        """剥离消息开头的 @ 片段，并提取 QQ 全量消息里的 openid。"""
+        clean_content = content or ""
+        mentioned = False
+        mention_ids: list[str] = []
 
-            except Exception as e:
-                self.logger.error(f"发送AI回复时出错: {e}")
-                self.logger.error(traceback.format_exc())
+        while True:
+            original = clean_content
+            for pattern, captures_openid in LEADING_MENTION_PATTERNS:
+                match = pattern.match(clean_content)
+                if not match:
+                    continue
+                mention_id = match.group(1).strip() if captures_openid else ""
+                if captures_openid and mention_id:
+                    mention_ids.append(mention_id)
+                clean_content = clean_content[match.end():]
+                break
+            if clean_content == original:
+                break
+            mentioned = True
+
+        return clean_content.strip(), mentioned, mention_ids
+
+    async def _handle_bind_bot_openid_command(
+        self,
+        data: Dict[str, Any],
+        user_id: Optional[str],
+        mention_ids: list[str],
+        params: str = "",
+    ) -> bool:
+        """管理员通过 @ 机器人绑定全量消息里的机器人 openid。"""
+        group_openid = data.get("group_openid")
+        event_type = data.get("type")
+        is_full_group_message = self._is_full_group_message_event(event_type)
+
+        if not auth_manager.is_admin(user_id):
+            await self._send_event_response(data, "您没有权限执行此命令，请联系管理员")
+            return True
+
+        bot_openid = mention_ids[0] if mention_ids else ""
+        if not bot_openid:
+            await self._send_event_response(data, f"请先 @ 机器人，再发送 `{BIND_BOT_OPENID_COMMAND}`")
+            return True
+
+        old_openid = self._get_bound_bot_openid()
+        self._bind_bot_openid(bot_openid, bound_by=user_id)
+        stats_manager.log_command("绑定机器人openid", user_id, group_openid)
+        if is_full_group_message:
+            message_archive.log_command_message(
+                data,
+                user_id=user_id,
+                group_openid=group_openid,
+                command="绑定机器人openid",
+                invoked_command=BIND_BOT_OPENID_COMMAND,
+                params=params,
+            )
+
+        if old_openid and old_openid != bot_openid:
+            response = f"已更新机器人 openid：`{old_openid}` -> `{bot_openid}`"
+        else:
+            response = f"已绑定机器人 openid：`{bot_openid}`"
+        self.logger.info(f"机器人 openid 已绑定: {bot_openid}, bound_by={user_id}")
+        await self._send_event_response(data, response)
+        return True
 
     async def handle_at_message(self, data):
         """处理频道@消息"""
@@ -282,18 +392,9 @@ class EventHandler:
         data["type"] = "AT_MESSAGE_CREATE"
         content = data.get("content", "")
         user_id = self._get_user_id(data)
-
-        clean_content = re.sub(r'<@!\d+>', '', content).strip()
-        clean_content = re.sub(r'@[\w\u4e00-\u9fa5]+\s*', '', clean_content).strip()
-
-        if ENABLE_AI_CHAT and AI_CHAT_MENTION_TRIGGER:
-            self._load_ai_plugin_if_needed()
-            if clean_content and not clean_content.startswith('/') and self.ai_chat_plugin:
-                self.logger.info(f"检测到AI聊天触发 (频道@): [{clean_content}]")
-                asyncio.create_task(self._run_ai_chat_and_reply(data, user_id))
-                return True
-            elif not self.ai_chat_plugin and clean_content and not clean_content.startswith('/'):
-                 self.logger.warning("AI聊天触发，但插件未加载。")
+        username = (data.get("author") or {}).get("username")
+        if user_id:
+            stats_manager.add_user(user_id, name=username)
 
         await self._process_command(content, data, user_id)
         return True
@@ -305,10 +406,11 @@ class EventHandler:
         data["type"] = "DIRECT_MESSAGE_CREATE"
         content = data.get("content", "")
         user_id = self._get_user_id(data)
+        username = (data.get("author") or {}).get("username")
 
         # 记录用户统计数据
         if user_id:
-            stats_manager.add_user(user_id)
+            stats_manager.add_user(user_id, name=username)
 
         await self._process_command(content, data, user_id)
         return True
@@ -321,37 +423,34 @@ class EventHandler:
         await self.handle_direct_message(data)
         return True
 
-    async def handle_group_at_message(self, data):
-        """处理群聊@消息"""
-        self.logger.info(f"收到群聊@消息: {data}")
-        # 设置事件类型，确保黑名单检查能正确识别
-        data["type"] = "GROUP_AT_MESSAGE_CREATE"
+    async def _handle_group_message_common(self, data: Dict[str, Any], event_type: str):
+        """处理群聊消息（全量群消息或群聊@消息）的公共逻辑。"""
+        data["type"] = event_type
         content = data.get("content", "")
         user_id = self._get_user_id(data)
+        username = (data.get("author") or {}).get("username")
         group_openid = data.get("group_openid")
-        
+
         # 记录用户和群组统计数据
         if user_id:
-            stats_manager.add_user(user_id)
+            stats_manager.add_user(user_id, name=username)
         if group_openid:
             stats_manager.add_group(group_openid)
             if user_id:
                 stats_manager.add_user_to_group(group_openid, user_id)
-        
-        clean_content = re.sub(r'<@!\d+>', '', content).strip()
-        clean_content = re.sub(r'@[\w\u4e00-\u9fa5]+\s*', '', clean_content).strip()
-
-        if ENABLE_AI_CHAT and AI_CHAT_MENTION_TRIGGER:
-            self._load_ai_plugin_if_needed()
-            if clean_content and not clean_content.startswith('/') and self.ai_chat_plugin:
-                self.logger.info(f"检测到AI聊天触发 (群聊@): [{clean_content}]")
-                data["type"] = "GROUP_AT_MESSAGE_CREATE"
-                asyncio.create_task(self._run_ai_chat_and_reply(data, user_id))
-                return True
-            elif not self.ai_chat_plugin and clean_content and not clean_content.startswith('/'):
-                 self.logger.warning("AI聊天触发(群聊)，但插件未加载。")
 
         await self._process_command(content, data, user_id)
+        return True
+
+    async def handle_group_message(self, data):
+        """处理已授权全量群消息。"""
+        self.logger.info(f"收到群聊消息: {data}")
+        return await self._handle_group_message_common(data, "GROUP_MESSAGE_CREATE")
+
+    async def handle_group_at_message(self, data):
+        """处理群聊@消息"""
+        self.logger.info(f"收到群聊@消息: {data}")
+        await self._handle_group_message_common(data, "GROUP_AT_MESSAGE_CREATE")
         return True
 
     async def handle_ready(self, data):
@@ -366,16 +465,37 @@ class EventHandler:
 
     async def _process_command(self, content, data, user_id=None):
         """处理命令，找到插件或特殊命令（如/help）则创建后台任务执行"""
+        event_type = data.get("type")
+        group_openid = data.get("group_openid")
+        is_full_group_message = self._is_full_group_message_event(event_type)
+
+        def log_other_message_if_needed(reason: str, command: str = None, params_text: str = ""):
+            if not is_full_group_message:
+                return
+            stats_manager.log_other_message(user_id, group_openid)
+            message_archive.log_other_message(
+                data,
+                user_id=user_id,
+                group_openid=group_openid,
+                reason=reason,
+                command=command,
+                invoked_command=command,
+                params=params_text,
+            )
+
         # 检查黑名单
         is_blocked, block_reason = self._check_blacklist(data)
         if is_blocked:
             self.logger.info(f"黑名单检查: 被阻止, 原因='{block_reason}', SHOW_REASON={BLACKLIST_SHOW_REASON}")
+            log_other_message_if_needed("blacklisted")
 
             # 可选择性地向用户发送封禁原因（仅在私聊或@消息时）
-            event_type = data.get("type")
             self.logger.info(f"事件类型: {event_type}")
 
-            if event_type in ["DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE", "AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"]:
+            if event_type in [
+                "DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE",
+                "AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE", "GROUP_MESSAGE_CREATE",
+            ]:
                 self.logger.info(f"事件类型匹配，检查发送条件: block_reason={bool(block_reason)}, BLACKLIST_SHOW_REASON={BLACKLIST_SHOW_REASON}")
 
                 if block_reason and BLACKLIST_SHOW_REASON:
@@ -401,37 +521,57 @@ class EventHandler:
 
             return False  # 被黑名单阻止，不处理
 
-        clean_content = re.sub(r'<@!\d+>', '', content).strip()
-        event_type = data.get("type")
-        is_at_message = event_type in ["AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"]
+        stripped_content, _has_leading_mention, mention_ids = self._strip_leading_mentions(content)
+        bound_bot_openid = self._get_bound_bot_openid()
+        mention_matches_bound_bot = bool(
+            bound_bot_openid and bound_bot_openid in mention_ids
+        )
+        stripped_command = stripped_content.split(' ', 1)[0] if stripped_content else ""
+        is_bind_bot_openid_command = stripped_command.lower() == BIND_BOT_OPENID_COMMAND.lower()
+        is_explicit_at_message = event_type in ["AT_MESSAGE_CREATE", "GROUP_AT_MESSAGE_CREATE"]
+        should_accept_stripped_content = (
+            is_explicit_at_message
+            or mention_matches_bound_bot
+            or (is_full_group_message and is_bind_bot_openid_command and bool(mention_ids))
+        )
+        clean_content = stripped_content if should_accept_stripped_content else (content or "").strip()
+        is_at_message = is_explicit_at_message or (
+            is_full_group_message and mention_matches_bound_bot
+        )
         is_direct_message = event_type in ["DIRECT_MESSAGE_CREATE", "C2C_MESSAGE_CREATE"]
+        suppress_invalid_feedback = FULL_MESSAGE_MODE and is_full_group_message
 
         # 如果不是@消息、私聊消息，且内容不以/开头，则忽略 (避免处理普通群聊消息)
         if not is_at_message and not is_direct_message and not clean_content.startswith('/'):
              self.logger.debug(f"忽略非 / 开头的普通群/频道消息: {clean_content[:50]}...")
+             log_other_message_if_needed("non_command_message")
              return False # 表明未处理
 
         # 处理空内容的情况
         if not clean_content:
+            log_other_message_if_needed("empty_message")
             # 只在 @消息 或 私聊 时回复提示
             if is_at_message or is_direct_message:
-                response = "有什么事嘛？你可以通过 /help 获取可用命令列表"
-                message_id = data.get("id")
-                target_id, is_group = self._get_channel_id(data)
+                response = self._build_help_shortcut_reply(
+                    "有什么事嘛？",
+                    "点击下方按钮查看可用命令。",
+                    user_id=user_id,
+                )
+                target_id, _ = self._get_channel_id(data)
                 if target_id:
-                     async def send_empty_reply(): # 修改函数名避免冲突
-                          try:
-                               # 使用统一的回复逻辑
-                               await self._send_reply(target_id, message_id, is_group, event_type, response)
-                          except Exception as e:
-                               self.logger.error(f"发送空命令提示时出错: {e}")
-                               self.logger.error(traceback.format_exc())
-                     asyncio.create_task(send_empty_reply())
-                     return True # 表明已处理 (开始发送回复)
+                    async def send_empty_reply():
+                        try:
+                            await self._send_event_response(data, response)
+                        except Exception as e:
+                            self.logger.error(f"发送空命令提示时出错: {e}")
+                            self.logger.error(traceback.format_exc())
+                    asyncio.create_task(send_empty_reply())
+                    return True
             return False # 其他情况（如空内容的普通群消息）不处理
 
         # 检查维护模式
         if auth_manager.is_maintenance_mode() and not auth_manager.is_admin(user_id):
+            log_other_message_if_needed("maintenance_blocked")
             response = "机器人当前处于维护模式，仅管理员可用"
             message_id = data.get("id")
             target_id, is_group = self._get_channel_id(data)
@@ -452,30 +592,33 @@ class EventHandler:
         params = parts[1] if len(parts) > 1 else ""
         
         command = command_raw
+
+        if command.lower() == BIND_BOT_OPENID_COMMAND.lower():
+            return await self._handle_bind_bot_openid_command(data, user_id, mention_ids, params)
         
-        # 检查命令前缀和私聊的特殊处理 (结合AI启用状态)
+        # 检查命令前缀和私聊的特殊处理
         if ENFORCE_COMMAND_PREFIX and not command.startswith('/') and not is_direct_message and not is_at_message:
              self.logger.debug(f"忽略非 / 开头的普通群/频道消息 (强制前缀): {command}")
+             log_other_message_if_needed("non_prefixed_message", command=command, params_text=params)
              return False # 不处理普通消息
         elif is_direct_message and not command.startswith('/'):
-             # 私聊时，如果AI未启用，且未使用 / 前缀，则提示需要加 /
-             if not ENABLE_AI_CHAT:
-                  response = f"命令必须以/开头\n你可以通过 /help 获取可用命令列表"
-                  message_id = data.get("id")
-                  target_id, is_group = self._get_channel_id(data) # is_group 应为 False
-                  if target_id:
-                       async def send_prefix_reply():
-                            try:
-                                await self._send_reply(target_id, message_id, is_group, event_type, response)
-                            except Exception as e:
-                                 self.logger.error(f"发送命令前缀提示时出错: {e}")
-                                 self.logger.error(traceback.format_exc())
-                       asyncio.create_task(send_prefix_reply())
-                       return True # 已处理 (发送提示)
-                  return False # 无法发送提示
-             # 如果AI启用，私聊时非 / 开头的消息可能触发AI (如果AI插件逻辑支持)
-             # 这里不直接处理，交给后续的插件查找逻辑 (或者AI插件的特殊处理)
-             pass 
+             log_other_message_if_needed("missing_prefix", command=command, params_text=params)
+             response = self._build_help_shortcut_reply(
+                 "命令必须以 / 开头",
+                 "请在命令前加上 `/`，或点击下方按钮查看可用命令。",
+                 user_id=user_id,
+             )
+             target_id, _ = self._get_channel_id(data)
+             if target_id:
+                  async def send_prefix_reply():
+                       try:
+                           await self._send_event_response(data, response)
+                       except Exception as e:
+                            self.logger.error(f"发送命令前缀提示时出错: {e}")
+                            self.logger.error(traceback.format_exc())
+                  asyncio.create_task(send_prefix_reply())
+                  return True
+             return False
         # 如果强制前缀，但命令没加/ (主要针对非私聊非@的情况，上面已处理)
         # elif ENFORCE_COMMAND_PREFIX and not command.startswith('/'):
         #     command = f'/{command}' # 强制加上 / - 这段逻辑似乎被上面的条件覆盖了，暂且注释
@@ -490,42 +633,84 @@ class EventHandler:
         
         response_to_send = None # 用于存储需要直接发送的响应 (help 或 not found)
         
-        # 记录命令使用统计
         if plugin:
-            group_openid = data.get("group_openid")
-            stats_manager.log_command(plugin.command, user_id, group_openid)
-            
-        if plugin:
-            # 找到插件，启动后台任务处理
+            # 找到插件，启动后台任务处理 (传入实际触发的命令名, 便于多命令插件分辨)
             self.logger.info(f"为命令 '{command}' 找到插件 '{plugin.__class__.__name__}'，创建后台处理任务")
-            asyncio.create_task(self._run_plugin_and_reply(plugin, params, user_id, data))
+            asyncio.create_task(self._run_plugin_and_reply(plugin, params, user_id, data, invoked_command=command))
             return True # 表示已开始处理
         elif command.lower() == "/help":
-            # 特殊处理 /help 命令
-            self.logger.info("处理内置 /help 命令")
-            response_to_send = plugin_manager.get_help()
-            # 记录help命令使用
+            # 特殊处理 /help 命令 - 使用富回复 (markdown + 按钮)
+            self.logger.info(f"处理内置 /help 命令, 参数='{params}'")
             stats_manager.log_command("help", user_id, data.get("group_openid"))
+            if is_full_group_message:
+                message_archive.log_command_message(
+                    data,
+                    user_id=user_id,
+                    group_openid=group_openid,
+                    command="help",
+                    invoked_command=command,
+                    params=params,
+                )
+            # 解析参数: "管理 2" → path="管理", page=2
+            help_path = ""
+            help_page = 1
+            if params.strip():
+                tokens = params.strip().split()
+                if len(tokens) > 1 and tokens[-1].isdigit():
+                    help_page = int(tokens[-1])
+                    help_path = " ".join(tokens[:-1])
+                else:
+                    help_path = params.strip()
+
+            # 确定回复目标
+            message_id = data.get("id")
+            target_id, is_group = self._get_channel_id(data)
+            if not target_id:
+                return False
+
+            help_replies = plugin_manager.get_help_replies(
+                path=help_path, page=help_page,
+                caller_openid=user_id, is_group=is_group,
+            )
+
+            async def send_help_replies():
+                for idx, reply in enumerate(help_replies):
+                    try:
+                        # 第一条用原 message_id 做被动回复, 后续用 msg_seq 递增
+                        await self._send_rich_reply(
+                            target_id, message_id, is_group, event_type,
+                            reply, data, msg_seq=idx + 1,
+                        )
+                    except Exception as e:
+                        self.logger.error(f"发送 /help 第 {idx+1} 条出错: {e}")
+                        self.logger.error(traceback.format_exc())
+            asyncio.create_task(send_help_replies())
+            return True
         else:
             # 未找到插件，也不是 /help
-             self.logger.warning(f"未找到命令 '{command}'")
-             response_to_send = f"未找到命令\n你可以通过 /help 获取可用命令列表"
+            self.logger.warning(f"未找到命令 '{command}'")
+            log_other_message_if_needed("unknown_command", command=command, params_text=params)
+            if suppress_invalid_feedback:
+                return False
+            response_to_send = self._build_help_shortcut_reply(
+                "未找到命令",
+                f"无法识别 `{command}`。\n\n点击下方按钮查看可用命令。",
+                user_id=user_id,
+            )
 
         # 如果有直接响应需要发送 (help 或 not found)
         if response_to_send:
-            message_id = data.get("id")
-            target_id, is_group = self._get_channel_id(data)
+            target_id, _ = self._get_channel_id(data)
             if target_id:
-                 # 使用后台任务发送响应
-                 async def send_direct_reply(response_text):
-                      try:
-                          await self._send_reply(target_id, message_id, is_group, event_type, response_text)
-                          self.logger.info(f"已发送直接回复到 {target_id} (Help/Not Found)")
-                      except Exception as e:
-                           self.logger.error(f"发送直接回复 (Help/Not Found) 时出错: {e}")
-                           self.logger.error(traceback.format_exc())
-                 asyncio.create_task(send_direct_reply(response_to_send))
-                 return True # 表示已开始处理 (发送回复)
+                async def send_direct_reply():
+                    try:
+                        await self._send_event_response(data, response_to_send)
+                        self.logger.info(f"已发送直接回复到 {target_id} (Help/Not Found)")
+                    except Exception as e:
+                        self.logger.error(f"发送直接回复 (Help/Not Found) 时出错: {e}")
+                        self.logger.error(traceback.format_exc())
+                asyncio.create_task(send_direct_reply())
+                return True
             else:
                  # 无法确定回复目标
                  self.logger.error(f"无法为命令 '{command}' 的直接响应确定回复目标")
@@ -579,6 +764,50 @@ class EventHandler:
             self.logger.error(f"发送回复时出错: {e}")
             self.logger.error(traceback.format_exc())
 
+    async def _send_rich_reply(self, target_id: str, message_id: Optional[str],
+                                is_group: bool, event_type: Optional[str],
+                                reply: Reply, event_data: Dict[str, Any],
+                                msg_seq: int = 1):
+        """渲染 Reply 对象并发送 (走 messages 接口直发, 支持 markdown/keyboard/media)"""
+        if reply.is_empty():
+            self.logger.warning("Reply 对象为空, 跳过发送")
+            return
+
+        import requests
+        from auth import auth_manager as _auth
+
+        # 构造 URL
+        is_private = self._is_private_message(event_type, target_id)
+        if is_group:
+            api_url = f"{API_BASE_URL}/v2/groups/{target_id}/messages"
+        elif is_private:
+            api_url = f"{API_BASE_URL}/v2/users/{target_id}/messages"
+        else:
+            # 频道 @消息走另一条路径, 不支持 markdown/按钮, 退化为纯文本
+            await self._send_reply(target_id, message_id, is_group, event_type,
+                                    reply.markdown or reply.text or "(消息)")
+            return
+
+        # 构造 payload
+        ws_event_id = event_data.get("_ws_event_id") if (not message_id and msg_seq == 1) else None
+        payload = reply.to_payload(
+            message_id=message_id,
+            event_id=ws_event_id,
+            msg_seq=msg_seq,
+            mention_user_id=self._get_executor_user_id(event_data),
+        )
+
+        try:
+            headers = _auth.get_auth_header(use_bot_token=True)
+            self.logger.info(f"发送富回复: POST {api_url} msg_type={payload.get('msg_type')} msg_seq={msg_seq}")
+            resp = await asyncio.to_thread(requests.post, api_url, json=payload, headers=headers)
+            self.logger.info(f"响应 {resp.status_code}: {resp.text[:300]}")
+            if resp.status_code != 200:
+                self.logger.error(f"富回复失败: {resp.text}")
+        except Exception as e:
+            self.logger.error(f"富回复发送异常: {e}")
+            self.logger.error(traceback.format_exc())
+
     # 新添加的群组和用户事件处理方法
     async def handle_group_add_robot(self, event_data: Dict[str, Any]) -> bool:
         """处理机器人加入群聊事件"""
@@ -616,13 +845,8 @@ class EventHandler:
         if not group_openid:
             self.logger.error("缺少群组ID")
             return False
-        
-        group = stats_manager.get_group(group_openid)
-        if group:
-            group["can_send_proactive_msg"] = False
-            stats_manager._save_data()
-            return True
-        return False
+
+        return stats_manager.set_group_proactive_message_permission(group_openid, False)
     
     async def handle_group_msg_receive(self, event_data: Dict[str, Any]) -> bool:
         """处理群聊接受机器人主动消息事件"""
@@ -632,13 +856,8 @@ class EventHandler:
         if not group_openid:
             self.logger.error("缺少群组ID")
             return False
-        
-        group = stats_manager.get_group(group_openid)
-        if group:
-            group["can_send_proactive_msg"] = True
-            stats_manager._save_data()
-            return True
-        return False
+
+        return stats_manager.set_group_proactive_message_permission(group_openid, True)
     
     async def handle_friend_add(self, event_data: Dict[str, Any]) -> bool:
         """处理用户添加机器人事件"""
@@ -674,13 +893,8 @@ class EventHandler:
         if not user_openid:
             self.logger.error("缺少用户ID")
             return False
-        
-        user = stats_manager.get_user(user_openid)
-        if user:
-            user["can_send_proactive_msg"] = False
-            stats_manager._save_data()
-            return True
-        return False
+
+        return stats_manager.set_user_proactive_message_permission(user_openid, False)
     
     async def handle_c2c_msg_receive(self, event_data: Dict[str, Any]) -> bool:
         """处理接受机器人主动消息事件"""
@@ -691,14 +905,9 @@ class EventHandler:
             self.logger.error("缺少用户ID")
             return False
 
-        user = stats_manager.get_user(user_openid)
-        if user:
-            user["can_send_proactive_msg"] = True
-            stats_manager._save_data()
-            return True
-        return False
+        return stats_manager.set_user_proactive_message_permission(user_openid, True)
 
-    # Botpy扩展事件处理方法
+    # 频道/扩展事件处理方法
     async def handle_message_create(self, event_data: Dict[str, Any]) -> bool:
         """处理消息创建事件（私域机器人）"""
         self.logger.info(f"收到消息创建事件: {event_data}")
@@ -751,9 +960,184 @@ class EventHandler:
         return True
 
     async def handle_interaction_create(self, event_data: Dict[str, Any]) -> bool:
-        """处理交互事件"""
+        """处理交互事件（主要处理按钮 action.type=1 的后端回调）
+
+        事件数据结构示例:
+        {
+            "id": "interaction_id",
+            "chat_type": 0/1/2,         # 0=群 1=频道 2=单聊
+            "type": 11,                  # 按钮场景
+            "data": {
+                "type": 11,
+                "resolved": {
+                    "button_data": "/help",
+                    "button_id": "1",
+                    "user_id": "openid"
+                }
+            },
+            "group_openid": "xxx",       # 群聊时
+            ...
+        }
+        """
         self.logger.info(f"收到交互事件: {event_data}")
+
+        data = event_data.get("data", {}) or {}
+        resolved = data.get("resolved", {}) or {}
+        button_data = resolved.get("button_data", "")
+        button_id = resolved.get("button_id", "")
+        clicker_user_id = (
+            resolved.get("user_id")
+            or event_data.get("group_member_openid")
+            or event_data.get("user_openid")
+            or ""
+        )
+        interaction_id = event_data.get("id")
+        # 真正用于被动消息 event_id 的是 WebSocket dispatch 顶层 id, 而非 interaction 自己的 id
+        ws_event_id = event_data.get("_ws_event_id") or interaction_id
+        # chat_type: 0=频道, 1=群聊, 2=单聊
+        chat_type = event_data.get("chat_type")
+        group_openid = event_data.get("group_openid")
+
+        self.logger.info(
+            f"按钮回调: button_id={button_id}, data='{button_data}', "
+            f"user={clicker_user_id}, chat_type={chat_type}, group={group_openid}"
+        )
+
+        # 必须立即 ACK, 否则 QQ 客户端会一直 loading 直到超时
+        if interaction_id:
+            asyncio.create_task(self._ack_interaction(interaction_id, code=0))
+
+        if not button_data:
+            return True
+
+        # 把 button_data 当成命令处理
+        cmd_text = button_data.strip()
+        parts = cmd_text.split(' ', 1)
+        cmd = parts[0]
+        params = parts[1] if len(parts) > 1 else ""
+
+        # 查找插件
+        plugin = plugin_manager.get_plugin(cmd)
+        if not plugin and cmd.startswith('/'):
+            plugin = plugin_manager.get_plugin(cmd[1:])
+
+        # 执行命令
+        response = None
+        try:
+            if plugin:
+                response = await plugin.handle(
+                    params, clicker_user_id,
+                    group_openid=group_openid, event_data=event_data,
+                    invoked_command=cmd,
+                )
+            elif cmd.lower() == "/help":
+                # /help 走富回复 (可能是多条)
+                help_path = ""
+                help_page = 1
+                if params.strip():
+                    tokens = params.strip().split()
+                    if len(tokens) > 1 and tokens[-1].isdigit():
+                        help_page = int(tokens[-1])
+                        help_path = " ".join(tokens[:-1])
+                    else:
+                        help_path = params.strip()
+                # 按钮回调里判断 group/single (chat_type=0 群, 1 频道, 2 单聊)
+                is_grp = bool(group_openid)
+                response = plugin_manager.get_help_replies(
+                    path=help_path, page=help_page,
+                    caller_openid=clicker_user_id, is_group=is_grp,
+                )
+            else:
+                response = self._build_help_shortcut_reply(
+                    "未找到命令",
+                    f"无法识别 `{cmd}`。\n\n点击下方按钮查看可用命令。",
+                    user_id=clicker_user_id,
+                )
+        except Exception as e:
+            self.logger.error(f"按钮回调执行命令异常: {e}")
+            self.logger.error(traceback.format_exc())
+            response = f"执行命令出错: {e}"
+
+        if not response:
+            return True
+
+        # 发送回响应。按钮交互没有 message_id, 用 event_id 绑定前置事件作为被动消息
+        try:
+            # Reply 富回复 vs 字符串响应
+            # 解析 API URL (按钮回调没有 message_id, 一律走 event_id 通道)
+            if group_openid:
+                api_url = f"{API_BASE_URL}/v2/groups/{group_openid}/messages"
+            elif clicker_user_id:
+                api_url = f"{API_BASE_URL}/v2/users/{clicker_user_id}/messages"
+            else:
+                self.logger.warning("按钮回调无法确定回复目标")
+                return True
+
+            import requests
+            from auth import auth_manager as _auth
+            headers = _auth.get_auth_header(use_bot_token=True)
+
+            # 统一成 List[Reply] / List[str] 处理
+            responses = response if isinstance(response, list) else [response]
+            for idx, item in enumerate(responses):
+                if isinstance(item, Reply):
+                    # 按钮回调没有 message_id, 走 event_id; 多条时 event_id 只能用一次
+                    # 后续条目使用主动消息(放弃 event_id 绑定)
+                    use_event_id = ws_event_id if idx == 0 else None
+                    payload = item.to_payload(event_id=use_event_id, mention_user_id=clicker_user_id)
+                    self.logger.info(f"按钮回调富回复 #{idx+1}: POST {api_url} msg_type={payload.get('msg_type')}")
+                    resp = await asyncio.to_thread(requests.post, api_url, json=payload, headers=headers)
+                    self.logger.info(f"响应 {resp.status_code}: {resp.text[:300]}")
+                else:
+                    # 字符串响应
+                    text = str(item)
+                    use_event_id = ws_event_id if idx == 0 else None
+                    await asyncio.to_thread(
+                        self._send_interaction_reply, api_url, use_event_id, text
+                    )
+        except Exception as e:
+            self.logger.error(f"按钮回调响应发送失败: {e}")
+            self.logger.error(traceback.format_exc())
+
         return True
+
+    def _send_interaction_reply(self, api_url: str, event_id: str, content: str):
+        """按钮回调专用: 用 event_id 发送被动文本消息"""
+        import requests
+        from auth import auth_manager as _auth
+        headers = _auth.get_auth_header(use_bot_token=True)
+        data = {
+            "msg_type": 0,
+            "content": content,
+        }
+        if event_id:
+            data["event_id"] = event_id
+        self.logger.info(f"按钮回调响应: POST {api_url} data={data}")
+        resp = requests.post(api_url, headers=headers, json=data)
+        self.logger.info(f"响应 {resp.status_code}: {resp.text}")
+        if resp.status_code != 200:
+            raise Exception(f"API {resp.status_code}: {resp.text}")
+        return resp.json()
+
+    async def _ack_interaction(self, interaction_id: str, code: int = 0):
+        """ACK 按钮交互事件 (否则客户端 loading 直到超时)
+
+        code: 0=成功, 1=失败, 2=频繁, 3=重复, 4=无权限, 5=仅管理员
+        """
+        import requests
+        from auth import auth_manager as _auth
+        try:
+            url = f"{API_BASE_URL}/interactions/{interaction_id}"
+            headers = _auth.get_auth_header(use_bot_token=True)
+            self.logger.info(f"ACK interaction: PUT {url} code={code}")
+            resp = await asyncio.to_thread(
+                requests.put, url, json={"code": code}, headers=headers
+            )
+            self.logger.info(f"ACK 响应 {resp.status_code}: {resp.text[:200]}")
+            if resp.status_code != 200:
+                self.logger.warning(f"ACK 失败: {resp.text}")
+        except Exception as e:
+            self.logger.error(f"ACK interaction 异常: {e}")
 
     async def handle_message_audit_pass(self, event_data: Dict[str, Any]) -> bool:
         """处理消息审核通过事件"""

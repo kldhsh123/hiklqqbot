@@ -1,6 +1,6 @@
 # HiklQQBot
 
-HiklQQBot 是一个基于 Python 的 QQ 官方机器人框架，支持 WebSocket 和 Webhook 两种通信方式。本框架由 AI 辅助完成大部分编写，具有插件化设计，易于扩展和使用。  
+HiklQQBot 是一个基于 Python 的 QQ 官方机器人框架，支持 WebSocket 和 Webhook 两种通信方式，具有插件化设计，易于扩展和使用。  
 > **qq交流群:330316577**
 
 [![Python Version](https://img.shields.io/badge/python-3.10-blue)](https://www.python.org/)
@@ -23,13 +23,12 @@ HiklQQBot 是一个基于 Python 的 QQ 官方机器人框架，支持 WebSocket
 - 📸 **富媒体支持**: 支持发送图片、视频、语音等富媒体内容，提供完整的媒体处理API
 
 ## 插件市场
-> 我们期待您天马行空的想法，您可以前往 [HiklQQBot官网](https://hiklbot.kldhsh.top/) 通过向AI描述您的想法来生成插件
 
-HiklQQBot 提供了丰富的插件生态系统，让你可以轻松扩展机器人功能：
+HiklQQBot 提供了独立插件仓库和插件索引，方便按需扩展机器人功能：
 
-🔍 [浏览插件市场](PLUGINS.md) - 查看所有可用插件、GitHub仓库链接和安装指南
+📦 [官方插件仓库](https://github.com/kldhsh123/hiklqqbot-plugin) - 存放可直接复制到 `plugins/` 目录的独立插件
 
-你也可以[贡献自己的插件](PLUGINS.md#如何提交插件)，分享给社区使用！
+你也可以[贡献自己的插件](https://github.com/kldhsh123/hiklqqbot-plugin)，分享给社区使用！
 
 
 ## 安装
@@ -175,6 +174,23 @@ Webhook 模式需要提供一个可以被 QQ 机器人平台访问的 URL，用�
    ```
 4. 将获得的公网 URL 填入 QQ 机器人管理后台的回调地址中
 
+### 全量消息模式
+
+开启 `FULL_MESSAGE_MODE=true` 后，框架可能收到群内所有消息。为了避免刷屏，全量模式下普通群聊里的未知命令、错误命令不会自动回复。
+
+首次开启全量模式后，需要让机器人管理员在群里 @ 机器人发送绑定命令：
+
+```text
+@机器人 /绑定机器人openid
+```
+
+框架会从 QQ 事件里的 `<@openid>` 标签中提取机器人 openid，并保存到框架 sqlite 数据库。绑定完成后，全量模式只会在消息开头 @ 到已绑定机器人 openid 时剥离 @ 标签，例如 `<@机器人openid> /help` 会按 `/help` 处理。
+
+注意事项：
+- 执行绑定命令的用户必须已经是机器人管理员。
+- 如果更换机器人、重建应用或 openid 变化，重新发送 `@机器人 /绑定机器人openid` 即可更新绑定。
+- 插件调用方式不需要修改，插件仍然接收清洗后的命令参数。
+
 ## 权限系统
 
 HiklQQBot 内置了简单而有效的权限管理系统：
@@ -183,7 +199,6 @@ HiklQQBot 内置了简单而有效的权限管理系统：
 
 - 首次使用 `/hiklqqbot_admin` 命令的用户将自动成为第一个管理员
 - 管理员可以添加和删除其他管理员
-- 管理员信息保存在 `admins.json` 文件中
 
 ### 维护模式
 
@@ -205,29 +220,8 @@ HiklQQBot 使用插件化设计，便于扩展新功能。要开发自己的插�
 3. 插件会自动加载，无需额外注册
 
 插件开发资源：
-- [完整插件市场和开发指南](PLUGINS.md)
+- [插件仓库](https://github.com/kldhsh123/hiklqqbot-plugin)
 - [插件开发详细文档](PLUGIN_DEV.md)
-
-简单插件示例:
-
-```python
-from plugins.base_plugin import BasePlugin
-
-class MyCustomPlugin(BasePlugin):
-    def __init__(self):
-        super().__init__(
-            command="/mycmd",  # 命令前缀
-            description="我的自定义命令",  # 描述
-            is_builtin=False,  # 是否内置
-            hidden=False  # 是否在帮助中隐藏
-        )
-        
-    async def handle(self, params: str, user_id: str = None, group_openid: str = None, **kwargs) -> str:
-        # 实现您的命令逻辑
-        if not params:
-            return "请提供参数"
-        return f"收到参数: {params}"
-```
 
 ## 常见问题
 
@@ -244,6 +238,7 @@ class MyCustomPlugin(BasePlugin):
    - 检查日志中是否收到了事件
    - 确认命令格式是否正确
    - 确认插件是否已正确注册
+   - 如果开启了 `FULL_MESSAGE_MODE=true`，确认管理员已在群里发送 `@机器人 /绑定机器人openid`
 
 ## 许可证
 
@@ -251,7 +246,6 @@ GPL-3.0 license
 
 ## 鸣谢
 
-- 本项目的核心框架由 AI 辅助完成
 - [QQ机器人官方文档](https://bot.q.qq.com/wiki/)
 - 所有贡献者和提出建议的人
 

@@ -1,6 +1,6 @@
 """
 增强的消息类型定义
-支持botpy消息对象和现有框架消息格式的统一处理
+统一处理 QQ V2 API 各类消息事件
 """
 
 import logging
@@ -25,6 +25,7 @@ class EventType(Enum):
     # 消息事件
     AT_MESSAGE_CREATE = "AT_MESSAGE_CREATE"
     DIRECT_MESSAGE_CREATE = "DIRECT_MESSAGE_CREATE"
+    GROUP_MESSAGE_CREATE = "GROUP_MESSAGE_CREATE"
     GROUP_AT_MESSAGE_CREATE = "GROUP_AT_MESSAGE_CREATE"
     C2C_MESSAGE_CREATE = "C2C_MESSAGE_CREATE"
     

@@ -12,6 +12,12 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")          # 机器人Token，仅用于Webhook�
 # 通信方式配置 (可选: "webhook" 或 "websocket")
 COMM_MODE = os.getenv("COMM_MODE", "websocket")
 
+# 全量消息模式配置
+FULL_MESSAGE_MODE = os.getenv("FULL_MESSAGE_MODE", "false").lower() == "true"
+
+# 框架内部数据存储（sqlite3）
+FRAMEWORK_DB_PATH = os.getenv("FRAMEWORK_DB_PATH", "data/framework.db")
+
 # Webhook相关配置 (仅COMM_MODE="webhook"时使用)
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "0.0.0.0")
 WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", 8080))
@@ -27,13 +33,6 @@ API_BASE_URL = "https://api.sgroup.qq.com"
 API_AUTH_URL = "https://bots.qq.com/app/getAppAccessToken"  # 正确的OAuth认证端点
 API_SEND_MESSAGE_URL = f"{API_BASE_URL}/v2/messages"
 
-# Botpy集成配置
-USE_BOTPY_CLIENT = os.getenv("USE_BOTPY_CLIENT", "false").lower() == "true"
-BOTPY_INTENTS = os.getenv("BOTPY_INTENTS", "public_messages,public_guild_messages,direct_message")
-BOTPY_LOG_LEVEL = os.getenv("BOTPY_LOG_LEVEL", "INFO")
-BOTPY_TIMEOUT = int(os.getenv("BOTPY_TIMEOUT", "5"))
-BOTPY_IS_SANDBOX = os.getenv("BOTPY_IS_SANDBOX", "false").lower() == "true"
-
 # 统计系统配置
 STATS_MAX_MONTHS = int(os.getenv("STATS_MAX_MONTHS", "12"))
 
@@ -42,3 +41,17 @@ ENABLE_BLACKLIST = os.getenv("ENABLE_BLACKLIST", "true").lower() == "true"
 BLACKLIST_AUTO_SAVE = os.getenv("BLACKLIST_AUTO_SAVE", "true").lower() == "true"
 BLACKLIST_LOG_BLOCKED = os.getenv("BLACKLIST_LOG_BLOCKED", "true").lower() == "true"
 BLACKLIST_SHOW_REASON = os.getenv("BLACKLIST_SHOW_REASON", "true").lower() == "true"
+
+# Help 菜单配置
+HELP_SHOW_BUTTONS = os.getenv("HELP_SHOW_BUTTONS", "true").lower() == "true"
+HELP_BUTTON_ACTION_TYPE = int(os.getenv("HELP_BUTTON_ACTION_TYPE", "2"))  # 2=发送型, 1=回调型
+HELP_PAGE_SIZE = int(os.getenv("HELP_PAGE_SIZE", "5"))  # 每页命令数
+
+# 日志配置
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_ROTATION_MODE = os.getenv("LOG_ROTATION_MODE", "both").lower()  # none/time/size/both
+LOG_ROTATION_WHEN = os.getenv("LOG_ROTATION_WHEN", "W0")  # D / W0-W6 / H / midnight
+LOG_ROTATION_INTERVAL = int(os.getenv("LOG_ROTATION_INTERVAL", "1"))
+LOG_ROTATION_MAX_BYTES = int(os.getenv("LOG_ROTATION_MAX_BYTES", "20971520"))  # 20MB
+LOG_ROTATION_BACKUP_COUNT = int(os.getenv("LOG_ROTATION_BACKUP_COUNT", "8"))
+LOG_ROTATION_COMPRESS = os.getenv("LOG_ROTATION_COMPRESS", "true").lower() == "true"
