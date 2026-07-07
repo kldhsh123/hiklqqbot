@@ -1471,6 +1471,20 @@ class StatsManager:
     def handle_group_del_robot(self, group_openid: str, op_member_openid: str, timestamp: int):
         return self.remove_group(group_openid)
 
+    def handle_group_member_add(self, group_openid: str, member_openid: str, timestamp: int):
+        """处理群成员加入事件"""
+        self.add_group(group_openid)
+        if member_openid:
+            self.add_user(member_openid)
+            self.add_user_to_group(group_openid, member_openid)
+        return True
+
+    def handle_group_member_remove(self, group_openid: str, member_openid: str, timestamp: int):
+        """处理群成员退出事件"""
+        if group_openid and member_openid:
+            self.remove_user_from_group(group_openid, member_openid)
+        return True
+
     def handle_friend_add(self, user_openid: str, timestamp: int):
         self.add_user(user_openid)
         framework_db.execute(
