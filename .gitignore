@@ -39,6 +39,8 @@ env/
 logs/*.log.*
 logs/command_messages/*.jsonl
 logs/other_messages/*.jsonl
+logs/system_messages/*.jsonl
+logs/bot_messages/*.jsonl
 /.claude
 admins.json
 blacklist.json

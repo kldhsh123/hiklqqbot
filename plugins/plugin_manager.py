@@ -421,6 +421,24 @@ class PluginManager:
             所有自定义插件实例的列表
         """
         return [plugin for plugin in self._unique_plugins() if not plugin.is_builtin]
+
+    async def dispatch_event(self, event_type: str, event_data: dict) -> None:
+        """把非命令事件分发给声明了事件 hook 的插件。"""
+        for plugin in self._unique_plugins():
+            if plugin.__class__.on_event is BasePlugin.on_event:
+                continue
+
+            supported_events = getattr(plugin, "event_types", None)
+            if supported_events and event_type not in supported_events:
+                continue
+
+            try:
+                await plugin.on_event(event_type, event_data)
+            except Exception as e:
+                self.logger.error(
+                    f"插件 {plugin.__class__.__name__} 处理事件 {event_type} 失败: {e}",
+                    exc_info=True,
+                )
         
     def get_help(self, show_hidden: bool = False) -> str:
         """
