@@ -16,17 +16,25 @@ class MessageArchive:
         self.log_dir = log_dir
         self.command_dir = os.path.join(log_dir, "command_messages")
         self.other_dir = os.path.join(log_dir, "other_messages")
+        self.bot_dir = os.path.join(log_dir, "bot_messages")
+        self.system_dir = os.path.join(log_dir, "system_messages")
         self._lock = Lock()
         self._ensure_dirs()
 
     def _ensure_dirs(self):
         os.makedirs(self.command_dir, exist_ok=True)
         os.makedirs(self.other_dir, exist_ok=True)
+        os.makedirs(self.bot_dir, exist_ok=True)
+        os.makedirs(self.system_dir, exist_ok=True)
 
     def _get_file_path(self, category: str) -> str:
         date_str = datetime.now().strftime("%Y-%m-%d")
         base_dir = self.command_dir if category == "command" else self.other_dir
         return os.path.join(base_dir, f"{date_str}.jsonl")
+
+    def _get_system_file_path(self) -> str:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        return os.path.join(self.system_dir, f"{date_str}.jsonl")
 
     def _build_entry(
         self,
@@ -113,6 +121,36 @@ class MessageArchive:
             reason=reason,
         )
         self._append_entry("other", entry)
+
+
+    def log_system_message(
+        self,
+        group_openid: str,
+        content: str,
+        user_id: Optional[str] = None,
+        username: Optional[str] = None,
+        event_type: str = "",
+    ):
+        """归档系统事件消息（群成员加入/退出等）"""
+        try:
+            entry = {
+                "archived_at": datetime.now().isoformat(timespec="seconds"),
+                "category": "system",
+                "event_type": event_type,
+                "group_openid": group_openid,
+                "user_id": user_id or "",
+                "username": username or "",
+                "member_nick": username or "",
+                "raw_content": content,
+                "is_system": True,
+            }
+            file_path = self._get_system_file_path()
+            line = json.dumps(entry, ensure_ascii=False, default=str)
+            with self._lock:
+                with open(file_path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+        except Exception as e:
+            self.logger.error(f"写入系统消息归档失败: {e}")
 
 
 message_archive = MessageArchive()

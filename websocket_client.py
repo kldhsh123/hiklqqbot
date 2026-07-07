@@ -104,9 +104,10 @@ class WebSocketClient:
                 "op": 2,
                 "d": {
                     "token": token,
-                    # 1<<0 GUILDS, 1<<1 GUILD_MEMBERS, 1<<25 PUBLIC_MESSAGES (V2群/单聊),
-                    # 1<<26 INTERACTION (按钮回调), 1<<30 PUBLIC_GUILD_MESSAGES
-                    "intents": 1 << 25 | 1 << 0 | 1 << 1 | 1 << 26 | 1 << 30,
+                    # 1<<0 GUILDS, 1<<1 GUILD_MEMBERS, 1<<24 GROUP_MEMBER (群成员进退),
+                    # 1<<25 PUBLIC_MESSAGES (V2群/单聊), 1<<26 INTERACTION (按钮回调),
+                    # 1<<30 PUBLIC_GUILD_MESSAGES
+                    "intents": 1 << 24 | 1 << 25 | 1 << 0 | 1 << 1 | 1 << 26 | 1 << 30,
                     "shard": [0, 1],  # 单分片
                     "properties": {
                         "$os": "windows",

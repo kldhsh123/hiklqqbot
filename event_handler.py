@@ -61,6 +61,10 @@ class EventHandler:
             "GROUP_MSG_REJECT": self.handle_group_msg_reject,
             "GROUP_MSG_RECEIVE": self.handle_group_msg_receive,
 
+            # 群成员事件 - 新添加功能
+            "GROUP_MEMBER_ADD": self.handle_group_member_add,
+            "GROUP_MEMBER_REMOVE": self.handle_group_member_remove,
+
             # 用户事件 - 新添加功能
             "FRIEND_ADD": self.handle_friend_add,
             "FRIEND_DEL": self.handle_friend_del,
@@ -837,6 +841,90 @@ class EventHandler:
         
         return stats_manager.handle_group_del_robot(group_openid, op_member_openid, timestamp)
     
+    async def _send_group_welcome_farewell(self, group_openid: str, content: str):
+        """向群聊发送欢迎/欢送消息（主动消息，不需要 message_id）"""
+        try:
+            import asyncio as _asyncio
+            await _asyncio.to_thread(
+                MessageSender.send_group_message, group_openid, "text", content
+            )
+            self.logger.info(f"已向群 {group_openid[:16]}... 发送消息: {content[:50]}...")
+        except Exception as e:
+            self.logger.error(f"发送群消息失败: {e}")
+            self.logger.error(traceback.format_exc())
+
+    async def handle_group_member_add(self, event_data: Dict[str, Any]) -> bool:
+        """处理群成员加入事件（含欢迎消息）"""
+        self.logger.info(f"群成员加入: {event_data}")
+
+        group_openid = event_data.get("group_openid")
+        member_openid = event_data.get("member_openid")
+        timestamp = event_data.get("timestamp")
+
+        if not group_openid:
+            self.logger.error("缺少群组ID")
+            return False
+        if not member_openid:
+            self.logger.warning("成员加入事件缺少 member_openid")
+            return False
+
+        # 记录到统计数据库
+        stats_manager.handle_group_member_add(group_openid, member_openid, timestamp)
+
+        # 获取用户名并写系统消息归档
+        raw_username = stats_manager.get_username(member_openid)
+        member_name = raw_username or stats_manager.get_user_display_id(member_openid) or member_openid[:12]
+        message_archive.log_system_message(
+            group_openid=group_openid,
+            content="加入了群聊",
+            user_id=member_openid,
+            username=member_name,
+            event_type="GROUP_MEMBER_ADD",
+        )
+
+        # 发送欢迎消息
+        welcome_msg = f"欢迎新人 {member_name} 入群~ 🎉"
+        asyncio.create_task(self._send_group_welcome_farewell(group_openid, welcome_msg))
+
+        return True
+
+    async def handle_group_member_remove(self, event_data: Dict[str, Any]) -> bool:
+        """处理群成员退出事件（含欢送消息）"""
+        self.logger.info(f"群成员退出: {event_data}")
+
+        group_openid = event_data.get("group_openid")
+        member_openid = event_data.get("member_openid")
+        timestamp = event_data.get("timestamp")
+
+        if not group_openid:
+            self.logger.error("缺少群组ID")
+            return False
+        if not member_openid:
+            self.logger.warning("成员退出事件缺少 member_openid")
+            return False
+
+        # 获取退群前最后一次用户名，用于归档和消息
+        raw_username = stats_manager.get_username(member_openid)
+        member_name = raw_username or stats_manager.get_user_display_id(member_openid) or member_openid[:12]
+
+        # 记录到统计数据库
+        stats_manager.handle_group_member_remove(group_openid, member_openid, timestamp)
+
+        # 写系统消息归档
+        message_archive.log_system_message(
+            group_openid=group_openid,
+            content="退出了群聊",
+            user_id=member_openid,
+            username=member_name,
+            event_type="GROUP_MEMBER_REMOVE",
+        )
+
+        # 发送欢送消息
+        farewell_msg = f"{member_name} 已退出群聊，江湖再见~ 👋"
+        asyncio.create_task(self._send_group_welcome_farewell(group_openid, farewell_msg))
+
+        return True
+
     async def handle_group_msg_reject(self, event_data: Dict[str, Any]) -> bool:
         """处理群聊拒绝机器人主动消息事件"""
         self.logger.info(f"群聊拒绝机器人主动消息: {event_data}")
