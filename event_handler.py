@@ -841,19 +841,8 @@ class EventHandler:
         
         return stats_manager.handle_group_del_robot(group_openid, op_member_openid, timestamp)
     
-    async def _send_group_welcome_farewell(self, group_openid: str, content: str):
-        """向群聊发送欢迎/欢送消息（主动消息，不需要 message_id）"""
-        try:
-            await asyncio.to_thread(
-                MessageSender.send_group_message, group_openid, "text", content
-            )
-            self.logger.info(f"已向群 {group_openid[:16]}... 发送消息: {content[:50]}...")
-        except Exception as e:
-            self.logger.error(f"发送群消息失败: {e}")
-            self.logger.error(traceback.format_exc())
-
     async def handle_group_member_add(self, event_data: Dict[str, Any]) -> bool:
-        """处理群成员加入事件（含欢迎消息）"""
+        """处理群成员加入事件（统计、归档，并分发插件事件）"""
         self.logger.info(f"群成员加入: {event_data}")
 
         group_openid = event_data.get("group_openid")
@@ -881,14 +870,19 @@ class EventHandler:
             event_type="GROUP_MEMBER_ADD",
         )
 
-        # 发送欢迎消息
-        welcome_msg = f"欢迎新人 {member_name} 入群~ 🎉"
-        asyncio.create_task(self._send_group_welcome_farewell(group_openid, welcome_msg))
+        plugin_event_data = dict(event_data)
+        plugin_event_data.update({
+            "type": "GROUP_MEMBER_ADD",
+            "group_openid": group_openid,
+            "member_openid": member_openid,
+            "member_name": member_name,
+        })
+        asyncio.create_task(plugin_manager.dispatch_event("GROUP_MEMBER_ADD", plugin_event_data))
 
         return True
 
     async def handle_group_member_remove(self, event_data: Dict[str, Any]) -> bool:
-        """处理群成员退出事件（含欢送消息）"""
+        """处理群成员退出事件（统计、归档，并分发插件事件）"""
         self.logger.info(f"群成员退出: {event_data}")
 
         group_openid = event_data.get("group_openid")
@@ -918,9 +912,14 @@ class EventHandler:
             event_type="GROUP_MEMBER_REMOVE",
         )
 
-        # 发送欢送消息
-        farewell_msg = f"{member_name} 已退出群聊，江湖再见~ 👋"
-        asyncio.create_task(self._send_group_welcome_farewell(group_openid, farewell_msg))
+        plugin_event_data = dict(event_data)
+        plugin_event_data.update({
+            "type": "GROUP_MEMBER_REMOVE",
+            "group_openid": group_openid,
+            "member_openid": member_openid,
+            "member_name": member_name,
+        })
+        asyncio.create_task(plugin_manager.dispatch_event("GROUP_MEMBER_REMOVE", plugin_event_data))
 
         return True
 

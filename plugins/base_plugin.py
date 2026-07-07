@@ -131,6 +131,13 @@ class BasePlugin(ABC):
         """
         pass
 
+    async def on_event(self, event_type: str, event_data: Dict[str, Any]) -> None:
+        """可选事件 hook。
+
+        插件需要处理非命令事件时重写此方法；默认不处理任何事件。
+        """
+        return None
+
     def help(self) -> str:
         return f"{self.command} - {self.description}"
 
