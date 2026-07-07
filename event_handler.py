@@ -857,14 +857,14 @@ class EventHandler:
         self.logger.info(f"群成员加入: {event_data}")
 
         group_openid = event_data.get("group_openid")
-        member_openid = event_data.get("member_openid")
+        member_openid = event_data.get("member_openid") or event_data.get("op_member_openid")
         timestamp = event_data.get("timestamp")
 
         if not group_openid:
             self.logger.error("缺少群组ID")
             return False
         if not member_openid:
-            self.logger.warning("成员加入事件缺少 member_openid")
+            self.logger.warning("成员加入事件缺少 member_openid/op_member_openid")
             return False
 
         # 记录到统计数据库
@@ -892,14 +892,14 @@ class EventHandler:
         self.logger.info(f"群成员退出: {event_data}")
 
         group_openid = event_data.get("group_openid")
-        member_openid = event_data.get("member_openid")
+        member_openid = event_data.get("member_openid") or event_data.get("op_member_openid")
         timestamp = event_data.get("timestamp")
 
         if not group_openid:
             self.logger.error("缺少群组ID")
             return False
         if not member_openid:
-            self.logger.warning("成员退出事件缺少 member_openid")
+            self.logger.warning("成员退出事件缺少 member_openid/op_member_openid")
             return False
 
         # 获取退群前最后一次用户名，用于归档和消息
