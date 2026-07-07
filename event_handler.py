@@ -844,8 +844,7 @@ class EventHandler:
     async def _send_group_welcome_farewell(self, group_openid: str, content: str):
         """向群聊发送欢迎/欢送消息（主动消息，不需要 message_id）"""
         try:
-            import asyncio as _asyncio
-            await _asyncio.to_thread(
+            await asyncio.to_thread(
                 MessageSender.send_group_message, group_openid, "text", content
             )
             self.logger.info(f"已向群 {group_openid[:16]}... 发送消息: {content[:50]}...")
